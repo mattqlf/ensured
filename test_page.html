@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Example App</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+      main { max-width: 720px; }
+      a { color: #0055cc; }
+      section { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #ddd; }
+      button { padding: 0.5rem 0.75rem; }
+      label { display: block; margin-top: 1rem; }
+      input { padding: 0.4rem; width: 100%; max-width: 320px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Welcome</h1>
+      <p>Explore the content below or use the navigation.</p>
+      <p><a href="success.html">More information...</a></p>
+
+      <section aria-label="Controls">
+        <button id="counter">Click me</button>
+        <h2 id="status" aria-live="polite">Status: Idle</h2>
+
+        <label for="name">Name</label>
+        <input id="name" type="text" placeholder="Your name" />
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        var count = 0;
+        var btn = document.getElementById('counter');
+        var status = document.getElementById('status');
+        btn.addEventListener('click', function () {
+          count += 1;
+          status.textContent = 'Status: Clicked ' + count + ' time' + (count === 1 ? '' : 's');
+        });
+      })();
+    </script>
+  </body>
+  </html>
