@@ -30,7 +30,7 @@ def _load_system_prompt(prompt_filename: str = "prompt_v1.txt") -> str:
         raise FileNotFoundError(f"Failed to load system prompt from {path}: {e}")
 
 
-SYSTEM_PROMPT = _load_system_prompt()
+SYSTEM_PROMPT = _load_system_prompt("prompt_v3.txt")
 
 
 class AgentState(TypedDict):

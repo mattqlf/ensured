@@ -4,11 +4,6 @@ import asyncio
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Callable, Awaitable
 import traceback
-import http.server
-import socketserver
-import threading
-import contextlib
-import functools
 import os
 import time
 from pathlib import Path
@@ -88,40 +83,6 @@ async def run_test_case(browser: Browser, case: TestCase) -> bool:
         await context.close()
 
 
-class _ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-    daemon_threads = True
-
-
-@contextlib.contextmanager
-def maybe_start_static_server(port: int = 8000, directory: Optional[str] = None):
-    """Start a simple static file server for the current directory if nothing is listening.
-
-    If the port is busy, do nothing and just yield.
-    """
-    directory = directory or os.getcwd()
-    Handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=directory)
-    server = None
-    thread = None
-    try:
-        try:
-            server = _ThreadingServer(("127.0.0.1", port), Handler)
-        except OSError:
-            # Port likely in use; skip starting a server
-            yield False
-            return
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        # Give the server a moment to start
-        time.sleep(0.2)
-        yield True
-    finally:
-        if server is not None:
-            server.shutdown()
-            server.server_close()
-        if thread is not None:
-            thread.join(timeout=0.5)
-
-
 async def run_all(cases: List[TestCase], concurrency: int = 3) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = [None] * len(cases)  # type: ignore
     sem = asyncio.Semaphore(max(1, concurrency))
@@ -146,11 +107,17 @@ async def run_all(cases: List[TestCase], concurrency: int = 3) -> Dict[str, Any]
 
 
 def main() -> None:
-    # Base URL for tests. Default targets the React pages in the Next app.
+    # Base URL for tests. Targets the React pages in the Next app.
     # Start Next first: `cd tests && npm run dev`
-    # Override via env var if needed (e.g., static HTML):
-    #   TEST_BASE_URL=http://127.0.0.1:8000/static/
+    # Override via env var if needed:
+    #   TEST_BASE_URL=http://localhost:3000/cases/
     base = os.environ.get("TEST_BASE_URL", "http://localhost:3000/cases/")
+
+    # Normalize base to end with /cases/
+    base = base.rstrip("/")
+    if not base.endswith("/cases"):
+        base = base + "/cases"
+
     # Helper: success when heading name equals provided text (exact match)
     def heading_success(name: str) -> Callable[[Page], Awaitable[bool]]:
         async def _check(page: Page) -> bool:
@@ -161,57 +128,55 @@ def main() -> None:
                 return False
         return _check
 
-    # If base ends with /cases/, use the React routes; otherwise use the static HTML files
     next_paths = {
         "test_page.html": "test-page",
         "test_page2.html": "test-page2",
         "test_exam.html": "exam",
         "test_hard.html": "hard/start",
         "test_ultra.html": "ultra/start",
+        "test_llm_form.html": "llm-form/start",
     }
 
     def path(name: str) -> str:
-        if base.rstrip("/").endswith("/cases"):
-            return base + next_paths[name]
-        return base + name
+        return base.rstrip("/") + "/" + next_paths[name]
 
-    cases = [
+    cases: List[TestCase] = [
+        # TestCase(
+        #     url=path("test_page.html"),
+        #     prompt="Navigate to the success page.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_page2.html"),
+        #     prompt="Navigate to the success page.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_exam.html"),
+        #     prompt="Complete the exam and submit.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_hard.html"),
+        #     prompt="Place a successful order.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_ultra.html"),
+        #     prompt="Place a successful order.",
+        #     success_check=heading_success("success"),
+        # ),
         TestCase(
-            url=path("test_page.html"),
-            prompt="Navigate to the success page.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_page2.html"),
-            prompt="Navigate to the success page.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_exam.html"),
-            prompt="Complete the exam and submit.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_hard.html"),
-            prompt="Place a successful order.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_ultra.html"),
-            prompt="Place a successful order.",
+            url=path("test_llm_form.html") + "?task=hackernews-top-post",
+            prompt=(
+                "Go to Show HackerNews and get the top post. "
+                "Then return to the submission form and enter your final answer so it can be graded."
+            ),
             success_check=heading_success("success"),
         ),
     ]
 
-    if base.rstrip("/").endswith("/cases"):
-        # Hitting Next.js app; no static server needed
-        summary = asyncio.run(run_all(cases, concurrency=len(cases)))
-    else:
-        # Hitting static files; start a simple server if possible
-        with maybe_start_static_server(port=8000) as started:
-            if started:
-                print("Started local server on http://127.0.0.1:8000 (serving CWD)")
-            summary = asyncio.run(run_all(cases, concurrency=len(cases)))
+    summary = asyncio.run(run_all(cases, concurrency=len(cases)))
     print(f"Succeeded {summary['succeeded']} / {summary['total']}")
     for r in summary["results"]:
         print(f"- {r['url']}: {'OK' if r['success'] else 'FAIL'}")
