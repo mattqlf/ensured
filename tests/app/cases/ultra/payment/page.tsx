@@ -15,44 +15,45 @@ export default function UltraPayment() {
   }, []);
   const ok = pm === "card" && name.trim() !== "" && cc.trim() !== "" && confirm;
   return (
-    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #ddd" }}>
-        <strong>Payment</strong>
-        <nav aria-label="Breadcrumbs"><Link href="/cases/ultra/cart">Back</Link></nav>
-        <div>
-          Items: <strong id="count">{qty}</strong>
+    <div className="page">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <strong className="text-lg">Payment</strong>
+          <nav aria-label="Breadcrumbs"><Link className="nav-link" href="/cases/ultra/cart">Back</Link></nav>
+          <div>
+            Items: <strong id="count">{qty}</strong>
+          </div>
         </div>
       </header>
-      <main style={{ maxWidth: 760, margin: "24px auto", padding: "0 16px" }}>
-        <section className="card" aria-label="Checkout" style={{ border: "1px solid #ddd", borderRadius: 10, padding: 16, background: "#fff" }}>
-          <h1>Checkout</h1>
-          <div className="row" role="radiogroup" aria-label="Payment method" style={{ margin: 10 }}>
-            <label style={{ display: "block", margin: "4px 0" }}>
+      <main className="container">
+        <section className="card" aria-label="Checkout">
+          <h1 className="text-2xl font-semibold">Checkout</h1>
+          <div className="row" role="radiogroup" aria-label="Payment method">
+            <label className="block">
               <input type="radio" name="pm" value="card" checked={pm === "card"} onChange={() => setPm("card")} /> Card
             </label>
-            <label style={{ display: "block", margin: "4px 0" }}>
+            <label className="block">
               <input type="radio" name="pm" value="invoice" checked={pm === "invoice"} onChange={() => setPm("invoice")} /> Invoice
             </label>
           </div>
-          <div className="row" style={{ margin: 10 }}>
-            <label htmlFor="name">Name on card</label>
-            <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="row">
+            <label htmlFor="name" className="label">Name on card</label>
+            <input id="name" className="input" type="text" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="row" style={{ margin: 10 }}>
-            <label htmlFor="cc">Card number</label>
-            <input id="cc" type="text" value={cc} onChange={(e) => setCc(e.target.value)} />
+          <div className="row">
+            <label htmlFor="cc" className="label">Card number</label>
+            <input id="cc" className="input" type="text" value={cc} onChange={(e) => setCc(e.target.value)} />
           </div>
-          <div className="row" style={{ margin: 10 }}>
+          <div className="row">
             <label>
               <input id="confirm" type="checkbox" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} /> Confirm purchase
             </label>
           </div>
-          <div className="row" style={{ margin: 10 }}>
-            <button id="pay" className="btn" disabled={!ok} onClick={() => ok && router.push("/cases/success")}>Pay now</button>
+          <div className="row">
+            <button id="pay" className="btn btn-primary" disabled={!ok} onClick={() => ok && router.push("/cases/success")}>Pay now</button>
           </div>
         </section>
       </main>
     </div>
   );
 }
-

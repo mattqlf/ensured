@@ -39,54 +39,53 @@ export default function ExamPage() {
     router.push(`/cases/success?score=${score}&total=5`);
   }
 
-  const labelStyle = { display: "block", margin: "0.25rem 0" } as const;
-  const rowStyle = { margin: "1rem 0" } as const;
-  const mainStyle = { maxWidth: 820, margin: "2rem auto", fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" } as const;
-
   return (
-    <main style={mainStyle}>
-      <h1>Exam</h1>
-      <form onSubmit={onSubmit} aria-label="Exam form">
-        <fieldset>
-          <legend>1) 2 + 2 = ?</legend>
-          <label style={labelStyle}><input type="radio" name="q1" value="3" checked={q1 === "3"} onChange={() => setQ1("3")} />3</label>
-          <label style={labelStyle}><input type="radio" name="q1" value="4" checked={q1 === "4"} onChange={() => setQ1("4")} />4</label>
-          <label style={labelStyle}><input type="radio" name="q1" value="5" checked={q1 === "5"} onChange={() => setQ1("5")} />5</label>
-        </fieldset>
+    <div className="page">
+      <main className="container">
+        <div className="card max-w-3xl">
+          <h1 className="text-3xl font-semibold">Exam</h1>
+          <form onSubmit={onSubmit} aria-label="Exam form" className="mt-4 space-y-6">
+            <fieldset className="space-y-2">
+              <legend className="font-medium">1) 2 + 2 = ?</legend>
+              <label className="block"><input type="radio" name="q1" value="3" checked={q1 === "3"} onChange={() => setQ1("3")} /> 3</label>
+              <label className="block"><input type="radio" name="q1" value="4" checked={q1 === "4"} onChange={() => setQ1("4")} /> 4</label>
+              <label className="block"><input type="radio" name="q1" value="5" checked={q1 === "5"} onChange={() => setQ1("5")} /> 5</label>
+            </fieldset>
 
-        <fieldset>
-          <legend>2) Select all prime numbers</legend>
-          {(["2","3","4","5"] as const).map((v) => (
-            <label key={v} style={labelStyle}>
-              <input type="checkbox" name="q2" value={v} checked={q2.includes(v)} onChange={() => toggleMany(setQ2, q2, v)} />{v}
-            </label>
-          ))}
-        </fieldset>
+            <fieldset className="space-y-2">
+              <legend className="font-medium">2) Select all prime numbers</legend>
+              {(["2","3","4","5"] as const).map((v) => (
+                <label key={v} className="block">
+                  <input type="checkbox" name="q2" value={v} checked={q2.includes(v)} onChange={() => toggleMany(setQ2, q2, v)} /> {v}
+                </label>
+              ))}
+            </fieldset>
 
-        <fieldset>
-          <legend>3) Select all even numbers</legend>
-          {(["1","2","3","4"] as const).map((v) => (
-            <label key={v} style={labelStyle}>
-              <input type="checkbox" name="q3" value={v} checked={q3.includes(v)} onChange={() => toggleMany(setQ3, q3, v)} />{v}
-            </label>
-          ))}
-        </fieldset>
+            <fieldset className="space-y-2">
+              <legend className="font-medium">3) Select all even numbers</legend>
+              {(["1","2","3","4"] as const).map((v) => (
+                <label key={v} className="block">
+                  <input type="checkbox" name="q3" value={v} checked={q3.includes(v)} onChange={() => toggleMany(setQ3, q3, v)} /> {v}
+                </label>
+              ))}
+            </fieldset>
 
-        <div style={rowStyle}>
-          <label htmlFor="q4">4) 5 + 7 =</label>
-          <input id="q4" name="q4" type="text" value={q4} onChange={(e) => setQ4(e.target.value)} />
+            <div>
+              <label htmlFor="q4" className="label">4) 5 + 7 =</label>
+              <input id="q4" name="q4" type="text" value={q4} onChange={(e) => setQ4(e.target.value)} className="input" />
+            </div>
+
+            <div>
+              <label htmlFor="q5" className="label">5) √81 =</label>
+              <input id="q5" name="q5" type="text" value={q5} onChange={(e) => setQ5(e.target.value)} className="input" />
+            </div>
+
+            <div>
+              <button id="submit" type="submit" disabled={!isComplete} className="btn btn-primary">Submit</button>
+            </div>
+          </form>
         </div>
-
-        <div style={rowStyle}>
-          <label htmlFor="q5">5) √81 =</label>
-          <input id="q5" name="q5" type="text" value={q5} onChange={(e) => setQ5(e.target.value)} />
-        </div>
-
-        <div style={rowStyle}>
-          <button id="submit" type="submit" disabled={!isComplete}>Submit</button>
-        </div>
-      </form>
-    </main>
+      </main>
+    </div>
   );
 }
-

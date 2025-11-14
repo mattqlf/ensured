@@ -7,27 +7,30 @@ export default function TestPage() {
   const status = `Status: Clicked ${count} time${count === 1 ? "" : "s"}`;
 
   return (
-    <main style={{ maxWidth: 720, margin: "2rem auto", fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <h1>Welcome</h1>
-      <p>Explore the content below or use the navigation.</p>
-      <p>
-        <Link href="/cases/success">More information...</Link>
-      </p>
+    <div className="page">
+      <main className="container">
+        <div className="card">
+          <h1 className="text-3xl font-semibold">Welcome</h1>
+          <p className="text-zinc-600 dark:text-zinc-400">Explore the content below or use the navigation.</p>
+          <p className="mt-4">
+            <Link className="btn btn-primary" href="/cases/success">More information...</Link>
+          </p>
 
-      <section aria-label="Controls" style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid #ddd" }}>
-        <button id="counter" onClick={() => setCount((c) => c + 1)}>
-          Click me
-        </button>
-        <h2 id="status" aria-live="polite">
-          {count === 0 ? "Status: Idle" : status}
-        </h2>
+          <section aria-label="Controls" className="mt-6 border-t border-zinc-200 dark:border-zinc-800 pt-4">
+            <div className="row">
+              <button id="counter" className="btn btn-secondary" onClick={() => setCount((c) => c + 1)}>
+                Click me
+              </button>
+              <h2 id="status" aria-live="polite" className="text-lg font-medium">
+                {count === 0 ? "Status: Idle" : status}
+              </h2>
+            </div>
 
-        <label htmlFor="name" style={{ display: "block", marginTop: "1rem" }}>
-          Name
-        </label>
-        <input id="name" type="text" placeholder="Your name" style={{ padding: ".4rem", width: "100%", maxWidth: 320 }} />
-      </section>
-    </main>
+            <label htmlFor="name" className="label mt-4">Name</label>
+            <input id="name" className="input" type="text" placeholder="Your name" />
+          </section>
+        </div>
+      </main>
+    </div>
   );
 }
-

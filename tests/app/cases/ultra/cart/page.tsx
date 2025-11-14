@@ -16,35 +16,36 @@ export default function UltraCart() {
   const dec = () => setQty((n) => Math.max(0, n - 1));
   const ok = qty >= 1;
   return (
-    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #ddd" }}>
-        <strong>Cart</strong>
-        <nav aria-label="Breadcrumbs"><Link href="/cases/ultra/portal">Back</Link></nav>
-        <div>
-          Items: <strong id="count">{qty}</strong>
+    <div className="page">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <strong className="text-lg">Cart</strong>
+          <nav aria-label="Breadcrumbs"><Link className="nav-link" href="/cases/ultra/portal">Back</Link></nav>
+          <div>
+            Items: <strong id="count">{qty}</strong>
+          </div>
         </div>
       </header>
-      <main style={{ maxWidth: 760, margin: "24px auto", padding: "0 16px" }}>
-        <section className="card" aria-label="Items" style={{ border: "1px solid #ddd", borderRadius: 10, padding: 16, background: "#fff" }}>
-          <h1>Items</h1>
-          <div className="row" role="group" aria-label="Item One" style={{ display: "flex", gap: 8, alignItems: "center", margin: 8 }}>
+      <main className="container">
+        <section className="card" aria-label="Items">
+          <h1 className="text-2xl font-semibold">Items</h1>
+          <div className="row" role="group" aria-label="Item One">
             <span>Item One</span>
-            <button id="dec" className="btn" aria-label="Decrease" onClick={dec}>
+            <button id="dec" className="btn btn-secondary" aria-label="Decrease" onClick={dec}>
               -
             </button>
-            <span id="qty" aria-live="polite">
+            <span id="qty" aria-live="polite" className="px-3 py-1 rounded bg-zinc-100 dark:bg-zinc-800">
               {qty}
             </span>
-            <button id="inc" className="btn" aria-label="Increase" onClick={inc}>
+            <button id="inc" className="btn btn-secondary" aria-label="Increase" onClick={inc}>
               +
             </button>
           </div>
-          <div className="row" style={{ display: "flex", gap: 8, alignItems: "center", margin: 8 }}>
-            <button id="continue" className="btn" disabled={!ok} onClick={() => ok && router.push("/cases/ultra/payment")}>Continue</button>
+          <div className="row">
+            <button id="continue" className="btn btn-primary" disabled={!ok} onClick={() => ok && router.push("/cases/ultra/payment")}>Continue</button>
           </div>
         </section>
       </main>
     </div>
   );
 }
-

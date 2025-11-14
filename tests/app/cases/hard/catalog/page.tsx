@@ -23,38 +23,39 @@ export default function CatalogPage() {
   const toReviewHref = ok ? "/cases/hard/extras" : "/cases/hard/review";
 
   return (
-    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #ddd" }}>
-        <strong>Catalog</strong>
-        <nav aria-label="Breadcrumbs"><Link href="/cases/hard/start">Home</Link></nav>
-        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <span aria-live="polite">Cart: <strong id="count">{count}</strong></span>
-          <Link id="to-review" className="btn" role="button" aria-disabled={!ok} href={toReviewHref} tabIndex={ok ? 0 : -1}>
-            Go to review
-          </Link>
+    <div className="page">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <strong className="text-lg">Catalog</strong>
+          <nav aria-label="Breadcrumbs"><Link className="nav-link" href="/cases/hard/start">Home</Link></nav>
+          <div className="flex gap-3 items-center">
+            <span aria-live="polite">Cart: <strong id="count">{count}</strong></span>
+            <Link id="to-review" className="btn btn-outline" role="button" aria-disabled={!ok} href={toReviewHref} tabIndex={ok ? 0 : -1}>
+              Go to review
+            </Link>
+          </div>
         </div>
       </header>
-      <main style={{ maxWidth: 1000, margin: "24px auto", padding: "0 16px" }}>
-        <div role="list" aria-label="Products" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
+      <main className="container">
+        <div role="list" aria-label="Products" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[
             { name: "Alpha Gadget", desc: "Compact and powerful." },
             { name: "Beta Widget", desc: "Reliable and efficient." },
             { name: "Gamma Thing", desc: "Versatile everyday helper." },
             { name: "Delta Device", desc: "Built for performance." },
           ].map((p) => (
-            <div key={p.name} role="listitem" style={{ border: "1px solid #ddd", borderRadius: 10, padding: 12, background: "#fff" }}>
-              <h2>{p.name}</h2>
-              <p>{p.desc}</p>
-              <button className="btn add" onClick={add}>Add to cart</button>
+            <div key={p.name} role="listitem" className="card">
+              <h2 className="text-xl font-semibold">{p.name}</h2>
+              <p className="text-zinc-600 dark:text-zinc-400">{p.desc}</p>
+              <button className="btn btn-primary mt-3 add" onClick={add}>Add to cart</button>
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 12, borderTop: "1px solid #ddd" }}>
-          <Link className="btn" role="button" href="/cases/hard/start">Back</Link>
-          <button id="continue" className="btn" disabled={!ok} onClick={() => ok && router.push("/cases/hard/extras")}>Continue</button>
+        <div className="flex items-center justify-between mt-6 border-t border-zinc-200 dark:border-zinc-800 pt-4">
+          <Link className="btn btn-secondary" role="button" href="/cases/hard/start">Back</Link>
+          <button id="continue" className="btn btn-primary" disabled={!ok} onClick={() => ok && router.push("/cases/hard/extras")}>Continue</button>
         </div>
       </main>
     </div>
   );
 }
-

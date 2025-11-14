@@ -3,22 +3,23 @@ import Link from "next/link";
 
 export default function UltraStart() {
   return (
-    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #ddd" }}>
-        <strong>Ultra Demo</strong>
-        <nav aria-label="Main">
-          <Link href="/cases/test-page">Home</Link>
-          <span aria-hidden> </span>
-          <Link href="/cases/ultra/portal">Portal</Link>
-        </nav>
-        <div></div>
+    <div className="page">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <strong className="text-lg">Ultra Demo</strong>
+          <nav aria-label="Main" className="flex gap-4">
+            <Link className="nav-link" href="/cases/test-page">Home</Link>
+            <Link className="nav-link" href="/cases/ultra/portal">Portal</Link>
+          </nav>
+          <div></div>
+        </div>
       </header>
-      <main style={{ maxWidth: 960, margin: "24px auto", padding: "0 16px" }}>
-        <section className="card" aria-label="Intro" style={{ border: "1px solid #ddd", borderRadius: 12, padding: 24, background: "#fff" }}>
-          <h1>Start</h1>
-          <p>Explore the portal and complete the flow.</p>
-          <p>
-            <Link className="btn" role="button" href="/cases/ultra/portal">
+      <main className="container">
+        <section className="card" aria-label="Intro">
+          <h1 className="text-3xl font-semibold">Start</h1>
+          <p className="text-zinc-600 dark:text-zinc-400">Explore the portal and complete the flow.</p>
+          <p className="mt-4">
+            <Link className="btn btn-primary" role="button" href="/cases/ultra/portal">
               Enter portal
             </Link>
           </p>
@@ -27,4 +28,3 @@ export default function UltraStart() {
     </div>
   );
 }
-

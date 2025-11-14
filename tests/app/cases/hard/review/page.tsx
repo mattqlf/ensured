@@ -27,21 +27,23 @@ export default function ReviewPage() {
   }
 
   return (
-    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #ddd" }}>
-        <strong>Review</strong>
-        <nav aria-label="Breadcrumbs">
-          <Link href="/cases/hard/catalog">Catalog</Link>
-          <span aria-hidden style={{ margin: "0 4px" }}>/</span>
-          <Link href="/cases/hard/extras">Extras</Link>
-        </nav>
-        <div>
-          Cart: <strong id="count">{count}</strong>
+    <div className="page">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <strong className="text-lg">Review</strong>
+          <nav aria-label="Breadcrumbs" className="flex items-center gap-2">
+            <Link className="nav-link" href="/cases/hard/catalog">Catalog</Link>
+            <span aria-hidden className="text-zinc-400">/</span>
+            <Link className="nav-link" href="/cases/hard/extras">Extras</Link>
+          </nav>
+          <div>
+            Cart: <strong id="count">{count}</strong>
+          </div>
         </div>
       </header>
-      <main style={{ maxWidth: 760, margin: "24px auto", padding: "0 16px" }}>
-        <section className="card" aria-label="Summary" style={{ border: "1px solid #ddd", borderRadius: 10, padding: 16, background: "#fff" }}>
-          <h1>Order Summary</h1>
+      <main className="container">
+        <section className="card" aria-label="Summary">
+          <h1 className="text-2xl font-semibold">Order Summary</h1>
           <p>
             Items: <strong id="items">{count}</strong>
           </p>
@@ -51,14 +53,14 @@ export default function ReviewPage() {
           <p>
             Agreed: <strong id="agreed">{String(agreed)}</strong>
           </p>
-          <p id="msg" className="warn" role="status" aria-live="polite" style={{ color: "#b30000" }}>
+          <p id="msg" className="text-red-700" role="status" aria-live="polite">
             {msg}
           </p>
-          <div className="row" style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 12 }}>
-            <Link className="btn" role="button" href="/cases/hard/extras">
+          <div className="row mt-2">
+            <Link className="btn btn-secondary" role="button" href="/cases/hard/extras">
               Back
             </Link>
-            <button id="place" className="btn" onClick={place}>
+            <button id="place" className="btn btn-primary" onClick={place}>
               Place order
             </button>
           </div>
@@ -67,4 +69,3 @@ export default function ReviewPage() {
     </div>
   );
 }
-

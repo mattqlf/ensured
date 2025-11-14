@@ -21,36 +21,37 @@ export default function ExtrasPage() {
     localStorage.setItem("email", email.trim());
   }, [email]);
   return (
-    <div style={{ fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #ddd" }}>
-        <strong>Extras</strong>
-        <nav aria-label="Breadcrumbs"><Link href="/cases/hard/catalog">Back to catalog</Link></nav>
-        <div>
-          Cart: <strong id="count">{count}</strong>
+    <div className="page">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <strong className="text-lg">Extras</strong>
+          <nav aria-label="Breadcrumbs"><Link className="nav-link" href="/cases/hard/catalog">Back to catalog</Link></nav>
+          <div>
+            Cart: <strong id="count">{count}</strong>
+          </div>
         </div>
       </header>
-      <main style={{ maxWidth: 760, margin: "24px auto", padding: "0 16px" }}>
-        <section aria-label="Options" style={{ border: "1px solid #ddd", borderRadius: 10, padding: 16, background: "#fff" }}>
-          <h1>Options</h1>
-          <div style={{ margin: 12 }}>
-            <label style={{ display: "block", margin: "6px 0" }}>
+      <main className="container">
+        <section aria-label="Options" className="card">
+          <h1 className="text-2xl font-semibold">Options</h1>
+          <div className="my-3">
+            <label className="block my-1">
               <input id="agree" type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} /> I agree to the terms
             </label>
-            <label style={{ display: "block", margin: "6px 0" }}>
+            <label className="block my-1">
               <input id="expedite" type="checkbox" /> Expedite shipping
             </label>
           </div>
-          <div style={{ margin: 12 }}>
-            <label htmlFor="email">Email</label>
-            <input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <div className="my-3">
+            <label htmlFor="email" className="label">Email</label>
+            <input id="email" className="input" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
-          <div style={{ display: "flex", gap: 12, margin: 12 }}>
-            <button id="continue" className="btn" disabled={!ok} onClick={() => ok && router.push("/cases/hard/review")}>Continue</button>
-            <Link className="btn" role="button" href="/cases/hard/catalog">Back</Link>
+          <div className="flex gap-3 my-3">
+            <button id="continue" className="btn btn-primary" disabled={!ok} onClick={() => ok && router.push("/cases/hard/review")}>Continue</button>
+            <Link className="btn btn-secondary" role="button" href="/cases/hard/catalog">Back</Link>
           </div>
         </section>
       </main>
     </div>
   );
 }
-
