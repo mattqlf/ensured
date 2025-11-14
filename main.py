@@ -11,7 +11,7 @@ async def run(playwright: Playwright):
     await context.tracing.start(screenshots=True, snapshots=True, sources=True)
     page = await context.new_page()
 
-    await page.goto("http://localhost:8000/test_page2.html")
+    await page.goto("http://localhost:8000/static/test_page2.html")
 
     async def heading_success(page):
         try:
