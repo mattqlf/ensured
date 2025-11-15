@@ -10,7 +10,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright, Browser, Page
 
-from agent import make_agent
+from agent import make_agent, make_coord_tools
 
 
 @dataclass
@@ -41,7 +41,13 @@ async def run_test_case(browser: Browser, case: TestCase) -> bool:
     page = await context.new_page()
     try:
         await page.goto(case.url, wait_until="load")
-        agent = make_agent(page, prompt=case.prompt, is_success=case.success_check)
+        agent = make_agent(
+            page,
+            prompt=case.prompt,
+            is_success=case.success_check,
+            tool_builder=make_coord_tools,
+            include_ui_manifest=False,
+        )
         state = {"messages": [], "llm_calls": 0, "task_success": False}
         result = await agent.ainvoke(state)
         return bool(result.get("task_success"))
@@ -52,7 +58,7 @@ async def run_test_case(browser: Browser, case: TestCase) -> bool:
         print(tb.strip())
         try:
             # Attempt a quick failure screenshot for diagnosis
-            png = await page.screenshot(full_page=True)
+            png = await page.screenshot(full_page=False)
             fname = f"failure_{int(time.time())}.png"
             with open(fname, "wb") as f:
                 f.write(png)
@@ -114,8 +120,8 @@ def main() -> None:
     def heading_success(name: str) -> Callable[[Page], Awaitable[bool]]:
         async def _check(page: Page) -> bool:
             try:
-                await page.get_by_role("heading", name=name).wait_for(timeout=1500)
-                return True
+                locator = page.get_by_role("heading", name=name)
+                return (await locator.count()) > 0
             except Exception:
                 return False
         return _check
@@ -133,47 +139,54 @@ def main() -> None:
         return base.rstrip("/") + "/" + next_paths[name]
 
     cases: List[TestCase] = [
-        # TestCase(
-        #     url=path("test_page.html"),
-        #     prompt="Navigate to the success page.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_page2.html"),
-        #     prompt="Navigate to the success page.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_exam.html"),
-        #     prompt="Complete the exam and submit.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_hard.html"),
-        #     prompt="Place a successful order.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_ultra.html"),
-        #     prompt="Place a successful order.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_llm_form.html") + "?task=hackernews-top-post",
-        #     prompt=(
-        #         "Go to https://news.ycombinator.com/show and get the top post. "
-        #         "Then return to the submission form and enter your final answer so it can be graded."
-        #     ),
-        #     success_check=heading_success("success"),
-        # ),
+        TestCase(
+            url=path("test_page.html"),
+            prompt="Navigate to the success page.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_page2.html"),
+            prompt="Navigate to the success page.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_exam.html"),
+            prompt="Complete the exam and submit.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_hard.html"),
+            prompt="Place a successful order.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_ultra.html"),
+            prompt="Place a successful order.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_llm_form.html") + "?task=hackernews-top-post",
+            prompt=(
+                "Go to hackernews show and get the post with the most upvotes. "
+                "Then return to the submission form and enter your final answer so it can be graded."
+            ),
+            success_check=heading_success("success"),
+        ),
         TestCase(
             url=path("test_llm_form.html") + "?task=linkedin-scouting",
             prompt=(
                 "Research Matthew Li from Carnegie Mellon on LinkedIn."
-                "Determine what high school he went to and submit the answer to the form."
+                "Determine what high school he went to, go back to the form and submit your answer."
             ),
             success_check=heading_success("success"),
         ),
+        TestCase(
+            url=path("test_llm_form.html") + "?task=instagram-follower-count",
+            prompt=(
+                "Go to Instagram and go to my profile and get my follower count."
+                "Then, return to the submission form and submit your answer."
+            ),
+            success_check=heading_success("success"),
     ]
 
     summary = asyncio.run(run_all(cases, concurrency=len(cases)))

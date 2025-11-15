@@ -23,8 +23,8 @@ async def run(playwright: Playwright):
 
     async def heading_success(page):
         try:
-            await page.get_by_role("heading", name="success").wait_for(timeout=1500)
-            return True
+            locator = page.get_by_role("heading", name="success")
+            return (await locator.count()) > 0
         except Exception:
             return False
 
