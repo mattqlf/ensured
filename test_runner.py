@@ -20,35 +20,27 @@ class TestCase:
     success_check: Optional[Callable[[Page], Awaitable[bool]]] = None
 
 
+AUTH_STATE_PATH = Path(__file__).resolve().parent / "auth_state.json"
+
+
 async def run_test_case(browser: Browser, case: TestCase) -> bool:
-    context = await browser.new_context()
-    # Start tracing prior to any page actions for this test case
+    # If an authenticated storage state exists (created by auth_setup.py),
+    # reuse it so all tests start already logged in with a shared account.
+    context_kwargs = {}
+    if AUTH_STATE_PATH.exists():
+        context_kwargs["storage_state"] = str(AUTH_STATE_PATH)
+
+    context = await browser.new_context(**context_kwargs)
     try:
+        # Start tracing prior to any page actions for this test case
         await context.tracing.start(screenshots=True, snapshots=True, sources=True)
     except Exception:
         # Non-fatal: continue even if tracing fails to start
         pass
-    # Ensure no persisted cookies from previous runs
-    try:
-        await context.clear_cookies()
-    except Exception:
-        pass
+
     page = await context.new_page()
     try:
         await page.goto(case.url, wait_until="load")
-        # Clear origin storage once per test (localStorage/sessionStorage) and reload
-        try:
-            await page.evaluate(
-                """
-                () => {
-                  try { localStorage.clear(); } catch (e) {}
-                  try { sessionStorage.clear(); } catch (e) {}
-                }
-                """
-            )
-            await page.reload(wait_until="load")
-        except Exception:
-            pass
         agent = make_agent(page, prompt=case.prompt, is_success=case.success_check)
         state = {"messages": [], "llm_calls": 0, "task_success": False}
         result = await agent.ainvoke(state)
@@ -166,11 +158,19 @@ def main() -> None:
         #     prompt="Place a successful order.",
         #     success_check=heading_success("success"),
         # ),
+        # TestCase(
+        #     url=path("test_llm_form.html") + "?task=hackernews-top-post",
+        #     prompt=(
+        #         "Go to https://news.ycombinator.com/show and get the top post. "
+        #         "Then return to the submission form and enter your final answer so it can be graded."
+        #     ),
+        #     success_check=heading_success("success"),
+        # ),
         TestCase(
-            url=path("test_llm_form.html") + "?task=hackernews-top-post",
+            url=path("test_llm_form.html") + "?task=linkedin-scouting",
             prompt=(
-                "Go to Show HackerNews and get the top post. "
-                "Then return to the submission form and enter your final answer so it can be graded."
+                "Research Matthew Li from Carnegie Mellon on LinkedIn."
+                "Determine what high school he went to and submit the answer to the form."
             ),
             success_check=heading_success("success"),
         ),

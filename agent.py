@@ -1,12 +1,8 @@
 from __future__ import annotations
 from dotenv import load_dotenv
-
 import base64
 import asyncio
-import inspect
-import re
 import operator
-import ast
 from typing import Literal, Optional, Callable, Awaitable
 from pathlib import Path
 
@@ -17,9 +13,10 @@ from langchain.chat_models import init_chat_model
 from langchain.messages import AnyMessage, SystemMessage, ToolMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 
-from playwright.async_api import Page, expect
+from playwright.async_api import Page
 
 load_dotenv()
+
 
 def _load_system_prompt(prompt_filename: str = "prompt_v1.txt") -> str:
     prompts_dir = Path(__file__).resolve().parent / "prompts"
@@ -30,7 +27,7 @@ def _load_system_prompt(prompt_filename: str = "prompt_v1.txt") -> str:
         raise FileNotFoundError(f"Failed to load system prompt from {path}: {e}")
 
 
-SYSTEM_PROMPT = _load_system_prompt("prompt_v3.txt")
+SYSTEM_PROMPT = _load_system_prompt("prompt_v4.txt")
 
 
 class AgentState(TypedDict):
@@ -39,87 +36,126 @@ class AgentState(TypedDict):
     task_success: bool
 
 
-def make_run_pw_tool(page: Page):
-    @tool("run_pw")
-    async def run_pw(script: str, **_: dict) -> str:
-        """Execute a Playwright async snippet on the current page.
+def make_pw_tools(page: Page):
+    """Create Playwright tools that operate on the current page via roles.
 
-        Accepted format (only):
-            async def main(page):
-                # your Playwright steps here
+    The tools are:
+    - ``click``: click a control by ARIA role + accessible name.
+    - ``check``: ensure a checkbox / switch / radio is checked by role + name.
+    - ``input``: fill text into an input-like element by role + name.
+    - ``goto``: navigate to an absolute URL.
+    - ``back``: go back in browser history.
 
-        Returns:
-        - "OK: <repr(result)>" on success
-        - "ERROR: ..." with details and a screenshot snippet on failure
-        """
-        # Restrict builtins for a safer execution context.
-        safe_builtins = {
-            "True": True,
-            "False": False,
-            "None": None,
-            "len": len,
-            "range": range,
-            "min": min,
-            "max": max,
-            "sum": sum,
-            "enumerate": enumerate,
-            "str": str,
-            "int": int,
-            "float": float,
-            "bool": bool,
-            "list": list,
-            "dict": dict,
-            "set": set,
-            "tuple": tuple,
-            "print": print,
-        }
+    All tools must be driven using information from the UI_MANIFEST that the
+    agent receives with each screenshot. Never invent selectors; always use
+    roles and names exactly as they appear in UI_MANIFEST.
+    """
 
-        # Validate structure: only one async def main(page) at module level
+    TIMEOUT_MS = 4000
+
+    async def _run_with_timeout(operation: str, coro: Awaitable[object]) -> str:
+        """Run a Playwright coroutine with a timeout and return a simple status string."""
         try:
-            module = ast.parse(script)
-        except Exception as e:
-            return f"ERROR: parse: {type(e).__name__}: {e}"
-        defs = [n for n in module.body if isinstance(n, ast.AsyncFunctionDef)]
-        others = [n for n in module.body if not isinstance(n, ast.AsyncFunctionDef)]
-        if len(defs) != 1 or len(others) != 0 or defs[0].name != "main":
-            return (
-                "ERROR: format: Provide only one function 'async def main(page):' "
-                "and no other top-level code."
-            )
-
-        # Globals available to the script
-        g: dict = {"__builtins__": safe_builtins, "re": re, "expect": expect}
-
-        # Build async def main(page) (no wrapping)
-        try:
-            exec(script, g)
-        except Exception as e:
-            return f"ERROR: compile: {type(e).__name__}: {e}"
-        main = g.get("main")
-        if not inspect.iscoroutinefunction(main):
-            return "ERROR: Provided main() must be 'async def main(page)'"
-
-        # Set strict default to avoid long hangs on bad locators
-        TIMEOUT_MS = 4000
-        try:
-            # Apply per-step timeout inside Playwright
             page.set_default_timeout(TIMEOUT_MS)
         except Exception:
             pass
 
-        # Run with timeout and capture a screenshot on error
         try:
-            result = await asyncio.wait_for(main(page), timeout=TIMEOUT_MS / 1000)
-            return f"OK: {repr(result)}"
+            await asyncio.wait_for(coro, timeout=TIMEOUT_MS / 1000)
+            return f"OK: {operation}"
         except Exception as e:
-            try:
-                png = await page.screenshot(full_page=True)
-                b64 = base64.b64encode(png).decode("ascii")
-                return f"ERROR: {type(e).__name__}: {e} SCREENSHOT_PNG_BASE64={b64[:4096]}"
-            except Exception:
-                return f"ERROR: {type(e).__name__}: {e} (screenshot failed)"
+            return f"ERROR: {type(e).__name__}: {e}"
 
-    return run_pw
+    @tool("click")
+    async def click(role: str, name: Optional[str] = None) -> str:
+        """Click an element on the current page using its ARIA role and accessible name.
+
+        This is a thin wrapper around ``page.get_by_role(role, name=name).click()``.
+
+        Usage guidelines:
+        - Always choose ``role`` and ``name`` from the UI_MANIFEST provided alongside the screenshot.
+        - Only click elements that are listed in UI_MANIFEST (e.g. roles ``button``, ``link``, ``tab``, ``menuitem``).
+        - ``name`` must exactly match the text shown after the colon in UI_MANIFEST
+          (for example, for "- button: Continue", use role="button", name="Continue").
+        - Do not invent CSS selectors, XPath expressions, or guess at names; rely purely on role + name from UI_MANIFEST.
+
+        Returns "OK: clicked role='...' name='...'" on success or
+        "ERROR: ..." with details on failure.
+        """
+        locator = page.get_by_role(role, name=name) if name is not None else page.get_by_role(role)
+        operation = f"clicked role={role!r} name={name!r}"
+        return await _run_with_timeout(operation, locator.click())
+
+    @tool("check")
+    async def check(role: str, name: Optional[str] = None) -> str:
+        """Ensure a checkbox-like control is checked using its ARIA role and accessible name.
+
+        This wraps ``page.get_by_role(role, name=name).check()`` and is intended for roles
+        such as "checkbox", "radio", or "switch".
+
+        Usage guidelines:
+        - Use only for elements with roles that support a checked state ("checkbox", "radio", "switch").
+        - Choose ``role`` and ``name`` exactly from UI_MANIFEST; do not guess.
+        - Use this to turn something ON. It will not uncheck a control that is already checked.
+
+        Returns "OK: checked role='...' name='...'" on success or
+        "ERROR: ..." with details on failure.
+        """
+        locator = page.get_by_role(role, name=name) if name is not None else page.get_by_role(role)
+        operation = f"checked role={role!r} name={name!r}"
+        return await _run_with_timeout(operation, locator.check())
+
+    @tool("input")
+    async def input_text(role: str, name: Optional[str] = None, value: str = "") -> str:
+        """Enter text into an input-like element using its ARIA role and accessible name.
+
+        This wraps ``page.get_by_role(role, name=name).fill(value)``.
+
+        Usage guidelines:
+        - Use for roles such as "textbox" or "combobox" that appear in UI_MANIFEST.
+        - Choose ``role`` and ``name`` exactly from UI_MANIFEST; do not invent values.
+        - ``value`` should be the exact text that should appear in the field; existing contents are replaced.
+        - Do not send key-by-key commands (like "TAB" or "ENTER"); provide only the final text.
+
+        Returns "OK: filled role='...' name='...' with value='...'" on success or
+        "ERROR: ..." with details on failure.
+        """
+        locator = page.get_by_role(role, name=name) if name is not None else page.get_by_role(role)
+        operation = f"filled role={role!r} name={name!r} with value={value!r}"
+        return await _run_with_timeout(operation, locator.fill(value))
+
+    @tool("goto")
+    async def goto(url: str) -> str:
+        """Navigate the browser to a new absolute URL using Playwright ``page.goto(url)``.
+
+        Usage guidelines:
+        - Use when you need to open a completely new page or domain.
+        - Prefer the ``click`` tool for in-page navigation that can be done by clicking links or buttons.
+        - ``url`` should usually be an absolute URL starting with "http://" or "https://".
+        - After calling this tool, rely on the next screenshot and UI_MANIFEST to understand the new page state.
+
+        Returns "OK: navigated to url='...'" on success or
+        "ERROR: ..." with details on failure.
+        """
+        operation = f"navigated to url={url!r}"
+        return await _run_with_timeout(operation, page.goto(url))
+
+    @tool("back")
+    async def back() -> str:
+        """Navigate one step back in browser history using Playwright ``page.go_back()``.
+
+        Usage guidelines:
+        - Use when you need to return to the previous page in the browser history.
+        - Prefer this over manually re-entering a URL when you simply need to go back.
+        - After calling this tool, rely on the next screenshot and UI_MANIFEST to understand the new page state.
+
+        Returns "OK: navigated back in history" on success or
+        "ERROR: ..." with details on failure.
+        """
+        operation = "navigated back in history"
+        return await _run_with_timeout(operation, page.go_back())
+
+    return [click, check, input_text, goto, back]
 
 def make_agent(
     page: Page,
@@ -135,14 +171,13 @@ def make_agent(
     4) check success; if not, repeat
     """
     # Do not change: user requires this exact model setup
-    model = init_chat_model("gpt-5-mini", temperature=0.8)
+    model = init_chat_model("gemini-2.5-flash", model_provider="google_genai", temperature=1.0)
 
     # Require a task prompt (no fallback)
     if prompt is None or not str(prompt).strip():
         raise ValueError("prompt (task_prompt) must be provided for make_agent")
 
-    run_pw_tool = make_run_pw_tool(page)
-    tools = [run_pw_tool]
+    tools = make_pw_tools(page)
     tools_by_name = {t.name: t for t in tools}
     model_with_tools = model.bind_tools(tools)
 
@@ -212,11 +247,7 @@ def make_agent(
             content=[
                 {
                     "type": "text",
-                    "text": (
-                        f"URL: {current_url}\n"
-                        "Here is the current page screenshot and UI_MANIFEST (accessibility snapshot).\n"
-                        "Use only elements listed in UI_MANIFEST."
-                    ),
+                    "text": f"<url>\n{current_url}\n</url>",
                 },
                 {
                     "type": "image",
@@ -225,14 +256,14 @@ def make_agent(
                 },
                 {
                     "type": "text",
-                    "text": f"UI_MANIFEST_START\n{manifest}\nUI_MANIFEST_END",
+                    "text": f"<ui_manifest>\n{manifest}\n</ui_manifest>",
                 },
             ]
         )
 
         # 3) Send to LLM (with system prompt + required task prompt + history)
         task_prompt = prompt.strip()
-        effective_prompt = f"{SYSTEM_PROMPT}\n\nTask: {task_prompt}"
+        effective_prompt = f"{SYSTEM_PROMPT}\n<task>\n{task_prompt}\n</task>"
         ai_msg = await model_with_tools.ainvoke(
             [SystemMessage(content=effective_prompt)] + state["messages"] + [user_msg]
         )
@@ -255,7 +286,10 @@ def make_agent(
             if name not in tools_by_name:
                 results.append(
                     ToolMessage(
-                        content=f"ERROR: Unknown tool '{name}'. Use only 'run_pw' with a Playwright snippet.",
+                        content=(
+                            f"ERROR: Unknown tool '{name}'. "
+                            "Use only the supported tools: 'click', 'check', 'input', 'goto', or 'back'."
+                        ),
                         tool_call_id=tool_call["id"],
                     )
                 )

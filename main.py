@@ -3,11 +3,19 @@ from pathlib import Path
 from playwright.async_api import async_playwright, Playwright
 
 from agent import make_agent
+from pathlib import Path
+
+AUTH_STATE_PATH = Path(__file__).resolve().parent / "auth_state.json"
 
 
 async def run(playwright: Playwright):
     browser = await playwright.webkit.launch()
-    context = await browser.new_context(record_video_dir="videos/")
+
+    context_kwargs = {"record_video_dir": "videos/"}
+    if AUTH_STATE_PATH.exists():
+        context_kwargs["storage_state"] = str(AUTH_STATE_PATH)
+
+    context = await browser.new_context(**context_kwargs)
     await context.tracing.start(screenshots=True, snapshots=True, sources=True)
     page = await context.new_page()
 
