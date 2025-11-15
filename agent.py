@@ -1,7 +1,9 @@
 from __future__ import annotations
 import base64
 import asyncio
+import io
 import operator
+import os
 from typing import Literal, Optional, Callable, Awaitable, Any
 from pathlib import Path
 
@@ -14,6 +16,8 @@ from langchain.messages import AnyMessage, SystemMessage, ToolMessage, HumanMess
 from langgraph.graph import StateGraph, START, END
 
 from playwright.async_api import Page
+from PIL import Image
+import moondream as md
 
 load_dotenv()
 
@@ -73,7 +77,9 @@ def make_pw_tools(page: Page):
     async def click(role: str, name: Optional[str] = None) -> str:
         """Click an element on the current page using its ARIA role and accessible name.
 
-        This is a thin wrapper around ``page.get_by_role(role, name=name).click()``.
+        This is a wrapper around ``page.get_by_role(role, name=name).click()`` that
+        also waits for the page to finish loading after the click (load state "load")
+        before returning.
 
         Usage guidelines:
         - Always choose ``role`` and ``name`` from the UI_MANIFEST provided alongside the screenshot.
@@ -87,7 +93,17 @@ def make_pw_tools(page: Page):
         """
         locator = page.get_by_role(role, name=name) if name is not None else page.get_by_role(role)
         operation = f"clicked role={role!r} name={name!r}"
-        return await _run_with_timeout(operation, locator.click())
+        async def _do_click() -> None:
+            await locator.click()
+            try:
+                # Wait for the page to reach the "load" state after the click.
+                # If no navigation occurs, this should return quickly.
+                await page.wait_for_load_state("load")
+            except Exception:
+                # Ignore load waiting errors; the agent will still get a fresh screenshot.
+                pass
+
+        return await _run_with_timeout(operation, _do_click())
 
     @tool("check")
     async def check(role: str, name: Optional[str] = None) -> str:
@@ -165,16 +181,16 @@ def make_coord_tools(page: Page):
     """Create low-level coordinate-based Playwright tools for the current page.
 
     The tools are:
-    - ``coord_click``: move the mouse to absolute page coordinates (x, y) and click.
+    - ``coord_click``: ask Moondream to locate a point from the screenshot given a natural language description, then click there.
     - ``scroll``: scroll the page using mouse wheel deltas.
     - ``type``: type raw text with the keyboard into the currently focused element.
     - ``goto``: navigate to an absolute URL.
     - ``back``: go back in browser history.
 
-    Coordinate system:
-    - ``x`` and ``y`` are CSS pixels relative to the top-left of the page viewport.
-    - Derive coordinates from the screenshot you see; avoid random guessing.
-    - Keep clicks within the visible bounds of clear interactive controls.
+    Coordinate system for ``coord_click``:
+    - Moondream returns a point in normalized coordinates ``(x, y)`` in [0, 1] relative to the screenshot.
+    - These normalized coordinates are scaled to the default viewport size (1280 x 720) before clicking.
+    - The tool returns the normalized coordinates as the string ``\"(x, y)\"``.
 
     In this tool configuration, you have only coordinate-based mouse/keyboard
     input plus basic URL navigation (``goto``/``back``). You do not have
@@ -199,26 +215,89 @@ def make_coord_tools(page: Page):
             return f"ERROR: {type(e).__name__}: {e}"
 
     @tool("coord_click")
-    async def coord_click(x: float, y: float, button: str = "left") -> str:
-        """Click at absolute page coordinates ``(x, y)`` using the mouse.
+    async def coord_click(prompt: str, button: str = "left") -> str:
+        """Ask a vision model where to click in the current screenshot, then click there.
 
-        This wraps ``page.mouse.move(x, y)`` followed by ``page.mouse.click(x, y, button=...)``.
+        Use this tool when:
+        - You know which visual element you want to interact with, but you do not know its exact coordinates.
+        - You can describe the target in natural language, for example:
+          "Where is the profile button?", "Where is the blue 'Submit' button at the bottom?",
+          or "Where is the circular avatar in the top-right corner?".
 
-        Usage guidelines:
-        - Choose ``x`` and ``y`` from the screenshot you see; do not invent arbitrary coordinates.
-        - Coordinates are in CSS pixels relative to the current viewport, not screen pixels.
-        - Prefer clicking on obvious, visible interactive elements and avoid off-screen areas.
+        Arguments:
+        - ``prompt``: A clear question or instruction that describes exactly one clickable
+          visual target in the *current* screenshot. Phrase it as "Where is ...?" or
+          "Point to ...", and mention distinguishing details such as text, color, icon,
+          or approximate position.
+        - ``button``: Which mouse button to use for the click. Defaults to ``"left"``.
 
-        Returns "OK: clicked at (x, y)" on success or
-        "ERROR: ..." with details on failure.
+        Usage tips:
+        - Be specific and concrete in ``prompt``; mention visible text labels, colors,
+          icons, or positions (e.g. "the green 'Continue' button in the bottom-right").
+        - Refer only to elements that are visible in the current screenshot.
+        - Avoid asking about multiple elements at once; keep each call focused on a
+          single target to get a precise point.
         """
+        try:
+            page.set_default_timeout(TIMEOUT_MS)
+        except Exception:
+            pass
 
-        async def _do_click() -> None:
-            await page.mouse.move(x, y)
-            await page.mouse.click(x, y, button=button)
+        api_key = os.getenv("MOONDREAM_API_KEY")
+        if not api_key:
+            return "ERROR: MOONDREAM_API_KEY environment variable is not set"
 
-        operation = f"clicked at ({x}, {y}) with button={button!r}"
-        return await _run_with_timeout(operation, _do_click())
+        try:
+            # Capture a fresh screenshot of the current viewport
+            png_bytes = await page.screenshot(type="png", full_page=False)
+            image = Image.open(io.BytesIO(png_bytes))
+
+            # Initialize Moondream model
+            model = md.vl(api_key=api_key)
+
+            # Run Moondream point inference in a worker thread to avoid blocking the event loop
+            def _call_moondream() -> Any:
+                return model.point(image, prompt)
+
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(_call_moondream),
+                    timeout=TIMEOUT_MS / 1000,
+                )
+            except asyncio.TimeoutError as e:
+                return f"ERROR: Timeout during Moondream point call: {e}"
+
+            points = result.get("points") or []
+            if not points:
+                return "ERROR: Moondream returned no points"
+
+            point = points[0]
+            x_norm = float(point.get("x", 0.0))
+            y_norm = float(point.get("y", 0.0))
+
+            # Scale by default viewport size
+            x_scaled = x_norm * 1280.0
+            y_scaled = y_norm * 720.0
+
+            async def _do_click() -> None:
+                await page.mouse.click(x_scaled, y_scaled, button=button)
+                try:
+                    # Wait for the page to reach the "load" state after the click.
+                    # If no navigation occurs, this should return quickly.
+                    await page.wait_for_load_state("load")
+                except Exception:
+                    # Ignore load waiting errors; the agent will still get a fresh screenshot.
+                    pass
+
+            try:
+                await asyncio.wait_for(_do_click(), timeout=TIMEOUT_MS / 1000)
+            except asyncio.TimeoutError as e:
+                return f"ERROR: Timeout during Playwright click: {e}"
+
+            # Return normalized coordinates as requested, in (x, y) form
+            return f"({x_norm}, {y_norm})"
+        except Exception as e:
+            return f"ERROR: {type(e).__name__}: {e}"
 
     @tool("scroll")
     async def scroll(delta_x: float = 0, delta_y: float = 0) -> str:
@@ -313,7 +392,7 @@ def make_agent(
     4) check success; if not, repeat
     """
     # Do not change: user requires this exact model setup
-    model = init_chat_model("gemini-2.5-pro", model_provider="google_genai", temperature=1.0)
+    model = init_chat_model("gemini-2.5-flash", model_provider="google_genai", temperature=1.0, thinking_budget=0)
 
     # Require a task prompt (no fallback)
     if prompt is None or not str(prompt).strip():

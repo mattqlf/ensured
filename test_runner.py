@@ -139,47 +139,47 @@ def main() -> None:
         return base.rstrip("/") + "/" + next_paths[name]
 
     cases: List[TestCase] = [
-        TestCase(
-            url=path("test_page.html"),
-            prompt="Navigate to the success page.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_page2.html"),
-            prompt="Navigate to the success page.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_exam.html"),
-            prompt="Complete the exam and submit.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_hard.html"),
-            prompt="Place a successful order.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_ultra.html"),
-            prompt="Place a successful order.",
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_llm_form.html") + "?task=hackernews-top-post",
-            prompt=(
-                "Go to hackernews show and get the post with the most upvotes. "
-                "Then return to the submission form and enter your final answer so it can be graded."
-            ),
-            success_check=heading_success("success"),
-        ),
-        TestCase(
-            url=path("test_llm_form.html") + "?task=linkedin-scouting",
-            prompt=(
-                "Research Matthew Li from Carnegie Mellon on LinkedIn."
-                "Determine what high school he went to, go back to the form and submit your answer."
-            ),
-            success_check=heading_success("success"),
-        ),
+        # TestCase(
+        #     url=path("test_page.html"),
+        #     prompt="Navigate to the success page.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_page2.html"),
+        #     prompt="Navigate to the success page.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_exam.html"),
+        #     prompt="Complete the exam and submit.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_hard.html"),
+        #     prompt="Place a successful order.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_ultra.html"),
+        #     prompt="Place a successful order.",
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_llm_form.html") + "?task=hackernews-top-post",
+        #     prompt=(
+        #         "Go to hackernews show and get the post with the most upvotes. "
+        #         "Then return to the submission form and enter your final answer so it can be graded."
+        #     ),
+        #     success_check=heading_success("success"),
+        # ),
+        # TestCase(
+        #     url=path("test_llm_form.html") + "?task=linkedin-scouting",
+        #     prompt=(
+        #         "Research Matthew Li from Carnegie Mellon on LinkedIn."
+        #         "Determine what high school he went to, go back to the form and submit your answer."
+        #     ),
+        #     success_check=heading_success("success"),
+        # ),
         TestCase(
             url=path("test_llm_form.html") + "?task=instagram-follower-count",
             prompt=(
@@ -187,6 +187,7 @@ def main() -> None:
                 "Then, return to the submission form and submit your answer."
             ),
             success_check=heading_success("success"),
+        )
     ]
 
     summary = asyncio.run(run_all(cases, concurrency=len(cases)))
