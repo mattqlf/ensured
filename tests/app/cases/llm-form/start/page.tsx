@@ -49,11 +49,6 @@ export default function LlmFormStartPage() {
       <main className="container">
         <div className="card max-w-3xl">
           <h1 className="text-3xl font-semibold">Submit your answer</h1>
-          <p className="text-zinc-600 dark:text-zinc-400 mt-2">
-            Complete your task using the rest of the application, then return to this page and submit
-            your final answer in the form below.
-          </p>
-
           <form onSubmit={onSubmit} className="mt-6 space-y-4" aria-label="Task answer form">
             <div>
               <label htmlFor="answer" className="label">

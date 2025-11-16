@@ -132,7 +132,7 @@ async def create_authenticated_storage_state() -> None:
                 "--window-size=1280,720",
             ]
 
-        browser = await p.webkit.launch(**launch_kwargs)
+        browser = await p.chromium.launch(**launch_kwargs)
         try:
             context = await browser.new_context()
             page = await context.new_page()

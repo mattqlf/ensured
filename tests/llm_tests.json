@@ -1,11 +1,17 @@
 {
   "hackernews-top-post": {
-    "answer": "Tiny Diffusion"
+    "answer": "Show HN: Unflip – a puzzle game about XOR patterns of squares"
   },
   "linkedin-scouting": {
     "answer": "Troy High School"
   },
   "instagram-follower-count": {
     "answer": "236"
+  },
+  "discord-message": {
+    "answer": "234920"
+  },
+  "llm-research": {
+    "answer": "2582033"
   }
 }

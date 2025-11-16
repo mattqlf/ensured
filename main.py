@@ -9,7 +9,7 @@ AUTH_STATE_PATH = Path(__file__).resolve().parent / "auth_state.json"
 
 
 async def run(playwright: Playwright):
-    browser = await playwright.webkit.launch()
+    browser = await playwright.chromium.launch()
 
     context_kwargs = {"record_video_dir": "videos/"}
     if AUTH_STATE_PATH.exists():

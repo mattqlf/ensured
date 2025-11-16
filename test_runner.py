@@ -10,7 +10,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright, Browser, Page
 
-from agent import make_agent, make_coord_tools
+from agent import make_agent
 
 
 @dataclass
@@ -45,11 +45,10 @@ async def run_test_case(browser: Browser, case: TestCase) -> bool:
             page,
             prompt=case.prompt,
             is_success=case.success_check,
-            tool_builder=make_coord_tools,
-            include_ui_manifest=False,
+            include_ui_manifest=True,
         )
         state = {"messages": [], "llm_calls": 0, "task_success": False}
-        result = await agent.ainvoke(state)
+        result = await agent.ainvoke(state, {"recursion_limit": 100})
         return bool(result.get("task_success"))
     except Exception as e:
         # Treat any exception as a failure; print a brief reason for debugging
@@ -86,8 +85,8 @@ async def run_all(cases: List[TestCase], concurrency: int = 3) -> Dict[str, Any]
     sem = asyncio.Semaphore(max(1, concurrency))
 
     async with async_playwright() as p:
-        # Use WebKit to match your environment preference
-        browser = await p.webkit.launch()
+        # Use Chromium for running tests
+        browser = await p.chromium.launch()
         try:
             async def run_idx(i: int, case: TestCase):
                 async with sem:
@@ -139,52 +138,69 @@ def main() -> None:
         return base.rstrip("/") + "/" + next_paths[name]
 
     cases: List[TestCase] = [
-        # TestCase(
-        #     url=path("test_page.html"),
-        #     prompt="Navigate to the success page.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_page2.html"),
-        #     prompt="Navigate to the success page.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_exam.html"),
-        #     prompt="Complete the exam and submit.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_hard.html"),
-        #     prompt="Place a successful order.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_ultra.html"),
-        #     prompt="Place a successful order.",
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_llm_form.html") + "?task=hackernews-top-post",
-        #     prompt=(
-        #         "Go to hackernews show and get the post with the most upvotes. "
-        #         "Then return to the submission form and enter your final answer so it can be graded."
-        #     ),
-        #     success_check=heading_success("success"),
-        # ),
-        # TestCase(
-        #     url=path("test_llm_form.html") + "?task=linkedin-scouting",
-        #     prompt=(
-        #         "Research Matthew Li from Carnegie Mellon on LinkedIn."
-        #         "Determine what high school he went to, go back to the form and submit your answer."
-        #     ),
-        #     success_check=heading_success("success"),
-        # ),
+        TestCase(
+            url=path("test_page.html"),
+            prompt="Navigate to the success page.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_page2.html"),
+            prompt="Navigate to the success page.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_exam.html"),
+            prompt="Complete the exam and submit.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_hard.html"),
+            prompt="Place a successful order.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_ultra.html"),
+            prompt="Place a successful order.",
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_llm_form.html") + "?task=hackernews-top-post",
+            prompt=(
+                "Go to hackernews show and get the topmost post. "
+                "Then return to the submission form and enter your answer so it can be graded."
+            ),
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_llm_form.html") + "?task=linkedin-scouting",
+            prompt=(
+                "Research Jaesung Kim Li (CS @ University of Michigan) on LinkedIn."
+                "Determine what high school he went to, go back to the form and submit your answer."
+            ),
+            success_check=heading_success("success"),
+        ),
         TestCase(
             url=path("test_llm_form.html") + "?task=instagram-follower-count",
             prompt=(
                 "Go to Instagram and go to my profile and get my follower count."
                 "Then, return to the submission form and submit your answer."
+            ),
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_llm_form.html") + "?task=discord-message",
+            prompt=(
+                "Go to Discord and text NotThatBot a paragraph of random philosophical rambling."
+                "Only after you complete this task can you return to the submission form and submit the answer."
+            ),
+            success_check=heading_success("success"),
+        ),
+        TestCase(
+            url=path("test_llm_form.html") + "?task=llm-research",
+            prompt=(
+                "Perform research on the latest developments on Diffusion LLMs. Then, open Gmail and send an email to "
+                "mattqinli2569@gmail.com with a 2 page report your findings. Then, wait until you receive an email from"
+                "mattqinli2569@gmail.com, which will contain the answer. Once you get the answer, return to the submission form and submit the answer."
             ),
             success_check=heading_success("success"),
         )

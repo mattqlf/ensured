@@ -31,7 +31,7 @@ def _load_system_prompt(prompt_filename: str = "prompt_v1.txt") -> str:
         raise FileNotFoundError(f"Failed to load system prompt from {path}: {e}")
 
 
-SYSTEM_PROMPT = _load_system_prompt("prompt_v5.txt")
+SYSTEM_PROMPT = _load_system_prompt("prompt_v6.txt")
 
 
 class AgentState(TypedDict):
@@ -40,25 +40,30 @@ class AgentState(TypedDict):
     task_success: bool
 
 
-MAX_LLM_CALLS = 20
+def make_agent(
+    page: Page,
+    prompt: Optional[str] = None,
+    is_success: Optional[Callable[[Page], Awaitable[bool]]] = None,
+    *,
+    include_ui_manifest: bool = True,
+):
+    """Return a compiled LangGraph agent bound to the given Playwright page.
 
-
-def make_pw_tools(page: Page):
-    """Create Playwright tools that operate on the current page via roles.
-
-    The tools are:
-    - ``click``: click a control by ARIA role + accessible name.
-    - ``check``: ensure a checkbox / switch / radio is checked by role + name.
-    - ``input``: fill text into an input-like element by role + name.
-    - ``goto``: navigate to an absolute URL.
-    - ``back``: go back in browser history.
-
-    All tools must be driven using information from the UI_MANIFEST that the
-    agent receives with each screenshot. Never invent selectors; always use
-    roles and names exactly as they appear in UI_MANIFEST.
+    Loop per turn:
+    1) capture screenshot + accessibility UI manifest
+    2) send both to the LLM (multimodal)
+    3) execute any tool calls
+    4) check success; if not, repeat
     """
+    # model = init_chat_model("gpt-5", model_provider="openai", temperature=1.0, reasoning={"effort":"low"}, text={"verbosity": "medium"})
+    model = init_chat_model("gemini-2.5-pro", model_provider="google_genai", temperature=1.0, thinking_budget=8192)
 
-    TIMEOUT_MS = 4000
+    # Require a task prompt (no fallback)
+    if prompt is None or not str(prompt).strip():
+        raise ValueError("prompt (task_prompt) must be provided for make_agent")
+
+    # Shared timeout for Playwright and vision-driven tools
+    TIMEOUT_MS = 2000
 
     async def _run_with_timeout(operation: str, coro: Awaitable[object]) -> str:
         """Run a Playwright coroutine with a timeout and return a simple status string."""
@@ -77,37 +82,38 @@ def make_pw_tools(page: Page):
     async def click(role: str, name: Optional[str] = None) -> str:
         """Click an element on the current page using its ARIA role and accessible name.
 
-        This is a wrapper around ``page.get_by_role(role, name=name).click()`` that
-        also waits for the page to finish loading after the click (load state "load")
-        before returning.
+        This is your primary way to activate buttons, links, tabs, and other controls.
+        Always try this ARIA-based tool first, using entries from the UI_MANIFEST,
+        before falling back to coordinate-based tools such as ``coord_click``.
+
+        This wraps ``page.get_by_role(role, name=name).click()`` and waits for the
+        page to finish loading after the click (load state "load") before returning.
 
         Usage guidelines:
-        - Always choose ``role`` and ``name`` from the UI_MANIFEST provided alongside the screenshot.
-        - Only click elements that are listed in UI_MANIFEST (e.g. roles ``button``, ``link``, ``tab``, ``menuitem``).
+        - Choose ``role`` and ``name`` directly from the UI_MANIFEST shown with the screenshot.
+        - Only click elements that appear in the UI_MANIFEST (e.g. roles ``button``, ``link``, ``tab``, ``menuitem``).
         - ``name`` must exactly match the text shown after the colon in UI_MANIFEST
           (for example, for "- button: Continue", use role="button", name="Continue").
         - Do not invent CSS selectors, XPath expressions, or guess at names; rely purely on role + name from UI_MANIFEST.
-
-        Returns "OK: clicked role='...' name='...'" on success or
-        "ERROR: ..." with details on failure.
+        - If this tool fails because no matching element exists or the manifest is incomplete,
+          then consider using ``scroll`` to reveal more UI and, as a last resort, ``coord_click``.
         """
         locator = page.get_by_role(role, name=name) if name is not None else page.get_by_role(role)
         operation = f"clicked role={role!r} name={name!r}"
+
         async def _do_click() -> None:
             await locator.click()
-            try:
-                # Wait for the page to reach the "load" state after the click.
-                # If no navigation occurs, this should return quickly.
-                await page.wait_for_load_state("load")
-            except Exception:
-                # Ignore load waiting errors; the agent will still get a fresh screenshot.
-                pass
 
         return await _run_with_timeout(operation, _do_click())
 
     @tool("check")
     async def check(role: str, name: Optional[str] = None) -> str:
         """Ensure a checkbox-like control is checked using its ARIA role and accessible name.
+
+        This ARIA-based tool should be your first choice for toggles, checkboxes, radios,
+        and switches whenever the target appears in the UI_MANIFEST. Only if a matching
+        role+name cannot be found or this tool repeatedly fails should you fall back
+        to the coordinate-based ``coord_click`` tool.
 
         This wraps ``page.get_by_role(role, name=name).check()`` and is intended for roles
         such as "checkbox", "radio", or "switch".
@@ -116,9 +122,6 @@ def make_pw_tools(page: Page):
         - Use only for elements with roles that support a checked state ("checkbox", "radio", "switch").
         - Choose ``role`` and ``name`` exactly from UI_MANIFEST; do not guess.
         - Use this to turn something ON. It will not uncheck a control that is already checked.
-
-        Returns "OK: checked role='...' name='...'" on success or
-        "ERROR: ..." with details on failure.
         """
         locator = page.get_by_role(role, name=name) if name is not None else page.get_by_role(role)
         operation = f"checked role={role!r} name={name!r}"
@@ -128,6 +131,10 @@ def make_pw_tools(page: Page):
     async def input_text(role: str, name: Optional[str] = None, value: str = "") -> str:
         """Enter text into an input-like element using its ARIA role and accessible name.
 
+        This is the preferred way to fill textboxes, comboboxes, and similar fields:
+        always try this ARIA-based tool first using UI_MANIFEST information, before
+        resorting to coordinate-based focus plus the ``type`` tool.
+
         This wraps ``page.get_by_role(role, name=name).fill(value)``.
 
         Usage guidelines:
@@ -135,94 +142,41 @@ def make_pw_tools(page: Page):
         - Choose ``role`` and ``name`` exactly from UI_MANIFEST; do not invent values.
         - ``value`` should be the exact text that should appear in the field; existing contents are replaced.
         - Do not send key-by-key commands (like "TAB" or "ENTER"); provide only the final text.
-
-        Returns "OK: filled role='...' name='...' with value='...'" on success or
-        "ERROR: ..." with details on failure.
         """
         locator = page.get_by_role(role, name=name) if name is not None else page.get_by_role(role)
         operation = f"filled role={role!r} name={name!r} with value={value!r}"
         return await _run_with_timeout(operation, locator.fill(value))
 
-    @tool("goto")
-    async def goto(url: str) -> str:
-        """Navigate the browser to a new absolute URL using Playwright ``page.goto(url)``.
+    @tool("dropdown")
+    async def dropdown(role: str, name: Optional[str] = None, option: str = "") -> str:
+        """Select an option from a dropdown or combobox using its ARIA role and accessible name.
+
+        This is the preferred way to choose a value from native select elements
+        and ARIA comboboxes when they are exposed via ``get_by_role``.
+
+        This wraps ``page.get_by_role(role, name=name).select_option(label=option)``.
 
         Usage guidelines:
-        - Use when you need to open a completely new page or domain.
-        - Prefer the ``click`` tool for in-page navigation that can be done by clicking links or buttons.
-        - ``url`` should usually be an absolute URL starting with "http://" or "https://".
-        - After calling this tool, rely on the next screenshot and UI_MANIFEST to understand the new page state.
-
-        Returns "OK: navigated to url='...'" on success or
-        "ERROR: ..." with details on failure.
+        - Use for roles such as "combobox" or other dropdown-like controls that appear in UI_MANIFEST.
+        - Choose ``role`` and ``name`` exactly from UI_MANIFEST; do not invent values.
+        - ``option`` should match the visible text label of the option you want to select.
         """
-        operation = f"navigated to url={url!r}"
-        return await _run_with_timeout(operation, page.goto(url))
-
-    @tool("back")
-    async def back() -> str:
-        """Navigate one step back in browser history using Playwright ``page.go_back()``.
-
-        Usage guidelines:
-        - Use when you need to return to the previous page in the browser history.
-        - Prefer this over manually re-entering a URL when you simply need to go back.
-        - After calling this tool, rely on the next screenshot and UI_MANIFEST to understand the new page state.
-
-        Returns "OK: navigated back in history" on success or
-        "ERROR: ..." with details on failure.
-        """
-        operation = "navigated back in history"
-        return await _run_with_timeout(operation, page.go_back())
-
-    return [click, check, input_text, goto, back]
-
-
-def make_coord_tools(page: Page):
-    """Create low-level coordinate-based Playwright tools for the current page.
-
-    The tools are:
-    - ``coord_click``: ask Moondream to locate a point from the screenshot given a natural language description, then click there.
-    - ``scroll``: scroll the page using mouse wheel deltas.
-    - ``type``: type raw text with the keyboard into the currently focused element.
-    - ``goto``: navigate to an absolute URL.
-    - ``back``: go back in browser history.
-
-    Coordinate system for ``coord_click``:
-    - Moondream returns a point in normalized coordinates ``(x, y)`` in [0, 1] relative to the screenshot.
-    - These normalized coordinates are scaled to the default viewport size (1280 x 720) before clicking.
-    - The tool returns the normalized coordinates as the string ``\"(x, y)\"``.
-
-    In this tool configuration, you have only coordinate-based mouse/keyboard
-    input plus basic URL navigation (``goto``/``back``). You do not have
-    higher-level role-based click/input tools, so reason carefully from the
-    screenshot (and any provided context) to choose safe, precise coordinates
-    and focused elements.
-    """
-
-    TIMEOUT_MS = 4000
-
-    async def _run_with_timeout(operation: str, coro: Awaitable[object]) -> str:
-        """Run a Playwright coroutine with a timeout and return a simple status string."""
-        try:
-            page.set_default_timeout(TIMEOUT_MS)
-        except Exception:
-            pass
-
-        try:
-            await asyncio.wait_for(coro, timeout=TIMEOUT_MS / 1000)
-            return f"OK: {operation}"
-        except Exception as e:
-            return f"ERROR: {type(e).__name__}: {e}"
+        locator = page.get_by_role(role, name=name) if name is not None else page.get_by_role(role)
+        operation = f"selected option={option!r} for role={role!r} name={name!r}"
+        return await _run_with_timeout(operation, locator.select_option(label=option))
 
     @tool("coord_click")
     async def coord_click(prompt: str, button: str = "left") -> str:
         """Ask a vision model where to click in the current screenshot, then click there.
 
-        Use this tool when:
-        - You know which visual element you want to interact with, but you do not know its exact coordinates.
-        - You can describe the target in natural language, for example:
-          "Where is the profile button?", "Where is the blue 'Submit' button at the bottom?",
-          or "Where is the circular avatar in the top-right corner?".
+        This is a coordinate-based fallback. Use it only after ARIA-based tools
+        (``click``, ``check``, ``input``) have failed or are clearly not applicable
+        because the needed control does not appear in the UI_MANIFEST.
+
+        Typical use:
+        - You know which visual element you want to interact with, but you cannot
+          address it via ARIA role + name (for example, it is missing from UI_MANIFEST
+          or is purely decorative) and ARIA tools have already been tried.
 
         Arguments:
         - ``prompt``: A clear question or instruction that describes exactly one clickable
@@ -281,13 +235,6 @@ def make_coord_tools(page: Page):
 
             async def _do_click() -> None:
                 await page.mouse.click(x_scaled, y_scaled, button=button)
-                try:
-                    # Wait for the page to reach the "load" state after the click.
-                    # If no navigation occurs, this should return quickly.
-                    await page.wait_for_load_state("load")
-                except Exception:
-                    # Ignore load waiting errors; the agent will still get a fresh screenshot.
-                    pass
 
             try:
                 await asyncio.wait_for(_do_click(), timeout=TIMEOUT_MS / 1000)
@@ -303,6 +250,10 @@ def make_coord_tools(page: Page):
     async def scroll(delta_x: float = 0, delta_y: float = 0) -> str:
         """Scroll the page using mouse wheel deltas ``(delta_x, delta_y)``.
 
+        Use this to reveal more content so that ARIA-based tools (``click``, ``check``,
+        ``input``) can be applied to newly visible controls. Scrolling is often a good
+        step before giving up on ARIA and falling back to ``coord_click``.
+
         This wraps ``page.mouse.wheel(delta_x, delta_y)``.
 
         Usage guidelines:
@@ -311,9 +262,6 @@ def make_coord_tools(page: Page):
         - Use small increments (for example 200–800) rather than huge jumps, so you can
           observe intermediate states in subsequent screenshots.
         - Avoid excessive scrolling that would move far away from relevant content.
-
-        Returns "OK: scrolled by (delta_x, delta_y)" on success or
-        "ERROR: ..." with details on failure.
         """
 
         async def _do_scroll() -> None:
@@ -326,14 +274,17 @@ def make_coord_tools(page: Page):
     async def type_text(text: str) -> str:
         """Type raw text into the currently focused element using the keyboard.
 
+        This is a low-level, coordinate-based fallback for entering text.
+        Prefer the ARIA-based ``input`` tool whenever possible. Only use
+        ``type`` after you have already tried ``input`` and, if needed,
+        focused the correct field via ``coord_click``.
+
         This wraps ``page.keyboard.type(text)``.
 
         Usage guidelines:
-        - Before calling this, use ``coord_click`` (or another focusing step available
-          in this tool set) to focus the correct input element.
-
-        Returns "OK: typed text='...'" on success or
-        "ERROR: ..." with details on failure.
+        - Before calling this, use ARIA tools (``input``) when the field is in UI_MANIFEST.
+        - If ARIA input fails or is not available, you may use ``coord_click`` to focus
+          the correct input element, then call ``type`` with the text you want to enter.
         """
 
         async def _do_type() -> None:
@@ -342,18 +293,39 @@ def make_coord_tools(page: Page):
         operation = f"typed text={text!r}"
         return await _run_with_timeout(operation, _do_type())
 
+    @tool("keypress")
+    async def keypress(key: str) -> str:
+        """Press a single key or key combination on the keyboard.
+
+        This wraps ``page.keyboard.press(key)`` and is useful for actions that are
+        naturally triggered by keyboard input, such as pressing Enter to submit a
+        message or form, Escape to close a dialog, or arrow keys to navigate lists.
+
+        Usage guidelines:
+        - Prefer ARIA-based tools (``click``, ``input``, ``check``) when you can act
+          directly on a control. Use ``keypress`` when the UI specifically expects
+          a key event (e.g. chat apps that send on Enter, modals that close on Escape).
+        - Ensure the correct element is focused before calling ``keypress``. Use
+          ARIA tools (or ``coord_click`` as a fallback) to move focus as needed.
+        - Use Playwright key notation, such as "Enter", "Tab", "Escape",
+          "ArrowUp", "ArrowDown", or combinations like "Control+Enter".
+        """
+
+        async def _do_press() -> None:
+            await page.keyboard.press(key)
+
+        operation = f"pressed key={key!r}"
+        return await _run_with_timeout(operation, _do_press())
+
     @tool("goto")
     async def goto(url: str) -> str:
         """Navigate the browser to a new absolute URL using Playwright ``page.goto(url)``.
 
         Usage guidelines:
         - Use when you need to open a completely new page or domain.
-        - Prefer ``coord_click`` for in-page navigation that can be done by clicking links or buttons.
+        - Prefer ARIA-based ``click`` for in-page navigation that can be done by clicking links or buttons.
         - ``url`` should usually be an absolute URL starting with "http://" or "https://".
-        - After calling this tool, rely on the next screenshot to understand the new page state.
-
-        Returns "OK: navigated to url='...'" on success or
-        "ERROR: ..." with details on failure.
+        - After calling this tool, rely on the next screenshot and UI_MANIFEST to understand the new page state.
         """
         operation = f"navigated to url={url!r}"
         return await _run_with_timeout(operation, page.goto(url))
@@ -365,40 +337,36 @@ def make_coord_tools(page: Page):
         Usage guidelines:
         - Use when you need to return to the previous page in the browser history.
         - Prefer this over manually re-entering a URL when you simply need to go back.
-        - After calling this tool, rely on the next screenshot to understand the new page state.
-
-        Returns "OK: navigated back in history" on success or
-        "ERROR: ..." with details on failure.
+        - After calling this tool, rely on the next screenshot and UI_MANIFEST to understand the new page state.
         """
         operation = "navigated back in history"
         return await _run_with_timeout(operation, page.go_back())
 
-    return [coord_click, scroll, type_text, goto, back]
+    @tool("wait")
+    async def wait(seconds: float = 1.0) -> str:
+        """Pause for a short time to let the UI settle before taking further actions.
 
-def make_agent(
-    page: Page,
-    prompt: Optional[str] = None,
-    is_success: Optional[Callable[[Page], Awaitable[bool]]] = None,
-    *,
-    tool_builder: Callable[[Page], list[Any]] = make_pw_tools,
-    include_ui_manifest: bool = True,
-):
-    """Return a compiled LangGraph agent bound to the given Playwright page.
+        This tool simply waits for the requested number of seconds, without
+        performing any Playwright actions. Use it sparingly when asynchronous
+        content (such as results lists, feeds, or dynamically loaded forms)
+        needs extra time to appear or finish updating after a prior action.
 
-    Loop per turn:
-    1) capture screenshot + accessibility UI manifest
-    2) send both to the LLM (multimodal)
-    3) execute any tool calls
-    4) check success; if not, repeat
-    """
-    # Do not change: user requires this exact model setup
-    model = init_chat_model("gemini-2.5-flash", model_provider="google_genai", temperature=1.0, thinking_budget=0)
+        Usage guidelines:
+        - Prefer to use ARIA-based tools (``click``, ``input``, ``check``) first;
+          only call ``wait`` if the expected elements are still missing and
+          likely just need more time to load.
+        - Keep ``seconds`` small (for example 1–3 seconds). Avoid chaining many
+          long waits; instead, wait briefly and then re-check the UI_MANIFEST.
+        - Do not use this to stall indefinitely; every call should be purposeful
+          (e.g. "wait 2 seconds for the search results to load").
+        """
+        # Clamp to a reasonable range to avoid very long delays.
+        duration = max(0.0, min(float(seconds), 10.0))
+        await asyncio.sleep(duration)
+        return f"OK: waited {duration} seconds"
 
-    # Require a task prompt (no fallback)
-    if prompt is None or not str(prompt).strip():
-        raise ValueError("prompt (task_prompt) must be provided for make_agent")
-
-    tools = tool_builder(page)
+    # Unified toolset: ARIA-first tools plus coordinate-based and timing fallbacks.
+    tools = [click, check, input_text, dropdown, coord_click, scroll, type_text, keypress, goto, back, wait]
     tools_by_name = {t.name: t for t in tools}
     supported_tool_names = ", ".join(sorted(f"'{name}'" for name in tools_by_name))
     model_with_tools = model.bind_tools(tools)
@@ -420,29 +388,6 @@ def make_agent(
                 if not snap:
                     return "UI_MANIFEST_EMPTY"
 
-                roles_of_interest = {
-                    "button",
-                    "link",
-                    "textbox",
-                    "checkbox",
-                    "radio",
-                    "combobox",
-                    "option",
-                    "tab",
-                    "tablist",
-                    "tabpanel",
-                    "heading",
-                    "menuitem",
-                    "listitem",
-                    "group",
-                    "dialog",
-                    "spinbutton",
-                    "slider",
-                    "switch",
-                    "progressbar",
-                    "alert",
-                }
-
                 lines: list[str] = []
 
                 def walk(node):
@@ -452,9 +397,11 @@ def make_agent(
                     name = node.get("name")
                     disabled = node.get("disabled")
                     if not node.get("hidden"):
-                        if role in roles_of_interest and (name or role in {"heading", "group", "tablist", "tabpanel"}):
+                        # Do not filter by role: include all visible nodes that
+                        # have either a role or an accessible name.
+                        if role or name:
                             suffix = " [disabled]" if disabled else ""
-                            lines.append(f"- {role}: {name or '(no name)'}{suffix}")
+                            lines.append(f"- {role or '(no role)'}: {name or '(no name)'}{suffix}")
                     for child in node.get("children", []) or []:
                         walk(child)
 
@@ -542,8 +489,6 @@ def make_agent(
     def should_continue_from_llm(state: AgentState) -> Literal["tool_node", "llm_call", END]:
         if state.get("task_success"):
             return END
-        if state.get("llm_calls", 0) >= MAX_LLM_CALLS:
-            return END
         last = state["messages"][-1]
         if getattr(last, "tool_calls", None):
             return "tool_node"
@@ -560,7 +505,7 @@ def make_agent(
     builder.add_node("tool_node", tool_node)
 
     builder.add_edge(START, "llm_call")
-    builder.add_conditional_edges("llm_call", should_continue_from_llm, ["tool_node", END])
+    builder.add_conditional_edges("llm_call", should_continue_from_llm, ["tool_node", "llm_call", END])
     builder.add_conditional_edges("tool_node", should_continue_from_tool, ["llm_call", END])
 
     return builder.compile()
