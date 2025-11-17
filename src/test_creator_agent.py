@@ -1,39 +1,58 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
+from typing import Optional
+
 from dotenv import load_dotenv
 
 from langchain.chat_models import init_chat_model
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
+
 load_dotenv()
 
-PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "test_prompt_v2.txt"
+ROOT_DIR = Path(__file__).resolve().parents[1]
+
+# Prompts live at the project root alongside src/.
+PROMPT_PATH = ROOT_DIR / "prompts" / "test_prompt_v2.txt"
 
 
 def _load_system_prompt() -> str:
     """Return the system prompt for the test creator agent, read from a text file."""
     return PROMPT_PATH.read_text(encoding="utf-8").strip()
 
+
 TEST_CASES_FILENAME = "test_cases.json"
-TEST_CASES_OUTPUT_PATH = Path(__file__).resolve().parent / TEST_CASES_FILENAME
 
-model = init_chat_model("gemini-2.5-pro", model_provider="google_genai", temperature=1.0, thinking_budget=8192)
-
-test_creator_agent = create_deep_agent(
-    model=model,
-    backend=FilesystemBackend(root_dir="./tests", virtual_mode=True),
-    system_prompt=_load_system_prompt(),
+model = init_chat_model(
+    "gemini-2.5-pro",
+    model_provider="google_genai",
+    temperature=1.0,
+    thinking_budget=8192,
 )
 
-def generate_test_cases() -> Path:
+
+def create_test_creator_agent(root_dir: Path):
+    """Create a deep agent configured to operate within the given root directory."""
+    backend = FilesystemBackend(root_dir=str(root_dir), virtual_mode=True)
+    return create_deep_agent(
+        model=model,
+        backend=backend,
+        system_prompt=_load_system_prompt(),
+    )
+
+
+def generate_test_cases(root_dir: Path, output_path: Optional[Path] = None) -> Path:
     """Run the test_creator_agent once and persist test_cases.json to disk.
 
     Returns the path to the written JSON file.
     """
+    agent = create_test_creator_agent(root_dir)
+
     # Ask the agent to generate the test_cases.json file using its tools.
-    result = test_creator_agent.invoke(
+    result = agent.invoke(
         {
             "messages": [
                 {
@@ -86,10 +105,59 @@ def generate_test_cases() -> Path:
                 f"Test case at index {i} must have exactly 'starting_url' and 'task_prompt' keys."
             )
 
-    TEST_CASES_OUTPUT_PATH.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
-    return TEST_CASES_OUTPUT_PATH
+    if output_path is None:
+        # By default, write test_cases.json into the agent's root directory.
+        output_path = root_dir / TEST_CASES_FILENAME
+
+    output_path.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
+    return output_path
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate test_cases.json for a target web app directory "
+            "using the test creator agent."
+        )
+    )
+    parser.add_argument(
+        "--root",
+        "--root-dir",
+        dest="root_dir",
+        default="tests",
+        help=(
+            "Path (relative to the project root) to the directory the agent "
+            "should analyze (e.g. 'tests' or 'realistic-test'). "
+            "Default: 'tests'."
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        dest="output_path",
+        default=None,
+        help=(
+            "Optional path (relative to the project root or absolute) for the "
+            "generated test_cases.json. "
+            "Default: <root_dir>/test_cases.json."
+        ),
+    )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    path = generate_test_cases()
+    args = _parse_args()
+
+    root_dir = Path(args.root_dir)
+    if not root_dir.is_absolute():
+        root_dir = ROOT_DIR / root_dir
+
+    output_path: Optional[Path]
+    if args.output_path is not None:
+        output_path = Path(args.output_path)
+        if not output_path.is_absolute():
+            output_path = ROOT_DIR / output_path
+    else:
+        output_path = None
+
+    path = generate_test_cases(root_dir=root_dir, output_path=output_path)
     print(f"Wrote test cases to {path}")

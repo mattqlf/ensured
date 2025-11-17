@@ -24,7 +24,8 @@ from browser_tools import make_tools
 load_dotenv()
 
 def _load_system_prompt(prompt_filename: str = "prompt_v1.txt") -> str:
-    prompts_dir = Path(__file__).resolve().parent / "prompts"
+    # Prompts directory lives at the project root alongside src/.
+    prompts_dir = Path(__file__).resolve().parents[1] / "prompts"
     path = prompts_dir / prompt_filename
     try:
         return path.read_text(encoding="utf-8").strip()

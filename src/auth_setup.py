@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright, Page
 
 
-AUTH_STATE_PATH = Path(__file__).resolve().parent / "auth_state.json"
+# auth_state.json lives at the project root, one level above src/.
+AUTH_STATE_PATH = Path(__file__).resolve().parents[1] / "auth_state.json"
 
 
 # ---- Per-service login helpers -------------------------------------------------

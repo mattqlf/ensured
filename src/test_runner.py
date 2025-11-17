@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Awaitable
 import traceback
 import os
 import time
+import json
 from pathlib import Path
 
 from playwright.async_api import async_playwright, Browser, Page
@@ -19,7 +20,8 @@ class TestCase:
     prompt: str  # required task prompt
 
 
-AUTH_STATE_PATH = Path(__file__).resolve().parent / "auth_state.json"
+# auth_state.json and traces/ live at the project root, one level above src/.
+AUTH_STATE_PATH = Path(__file__).resolve().parents[1] / "auth_state.json"
 
 
 async def run_test_case(browser: Browser, case: TestCase) -> bool:
@@ -68,7 +70,7 @@ async def run_test_case(browser: Browser, case: TestCase) -> bool:
     finally:
         # Stop tracing and persist the trace to a unique file for this case
         try:
-            traces_dir = Path(__file__).resolve().parent / "traces"
+            traces_dir = Path(__file__).resolve().parents[1] / "traces"
             traces_dir.mkdir(exist_ok=True)
             slug = case.url.rsplit('/', 1)[-1].split('?')[0]
             slug = (slug.rsplit('.', 1)[0]) or "page"
@@ -104,87 +106,28 @@ async def run_all(cases: List[TestCase], concurrency: int = 3) -> Dict[str, Any]
 
 
 def main() -> None:
-    # Base URL for tests. Targets the React pages in the Next app.
-    # Start Next first: `cd tests && npm run dev`
-    # Override via env var if needed:
-    #   TEST_BASE_URL=http://localhost:3000/cases/
-    base = os.environ.get("TEST_BASE_URL", "http://localhost:3000/cases/")
+    # Base origin for tests (required).
+    # Example: TEST_BASE_URL=http://localhost:3000
+    base = os.environ["TEST_BASE_URL"].rstrip("/")
 
-    # Normalize base to end with /cases/
-    base = base.rstrip("/")
-    if not base.endswith("/cases"):
-        base = base + "/cases"
+    # Load structured test definitions from tests/test_cases.json at the project root.
+    tests_path = Path(__file__).resolve().parents[1] / "tests" / "test_cases.json"
+    raw = json.loads(tests_path.read_text())
 
-    next_paths = {
-        "test_page.html": "test-page",
-        "test_page2.html": "test-page2",
-        "test_exam.html": "exam",
-        "test_hard.html": "hard/start",
-        "test_ultra.html": "ultra/start",
-        "test_llm_form.html": "llm-form/start",
-    }
+    cases: List[TestCase] = []
+    for entry in raw:
+        starting_url = str(entry.get("starting_url", "")).strip()
+        task_prompt = str(entry.get("task_prompt", "")).strip()
+        if not starting_url or not task_prompt:
+            continue
 
-    def path(name: str) -> str:
-        return base.rstrip("/") + "/" + next_paths[name]
+        # Allow either absolute URLs or paths starting with /cases/ etc.
+        if starting_url.startswith("http://") or starting_url.startswith("https://"):
+            full_url = starting_url
+        else:
+            full_url = base + starting_url
 
-    cases: List[TestCase] = [
-        TestCase(
-            url=path("test_page.html"),
-            prompt="Navigate to the success page.",
-        ),
-        TestCase(
-            url=path("test_page2.html"),
-            prompt="Navigate to the success page.",
-        ),
-        TestCase(
-            url=path("test_exam.html"),
-            prompt="Complete the exam and submit.",
-        ),
-        TestCase(
-            url=path("test_hard.html"),
-            prompt="Place a successful order.",
-        ),
-        TestCase(
-            url=path("test_ultra.html"),
-            prompt="Place a successful order.",
-        ),
-        TestCase(
-            url=path("test_llm_form.html") + "?task=hackernews-top-post",
-            prompt=(
-                "Go to hackernews show and get the topmost post. "
-                "Then return to the submission form and enter your answer so it can be graded."
-            ),
-        ),
-        TestCase(
-            url=path("test_llm_form.html") + "?task=linkedin-scouting",
-            prompt=(
-                "Research Jaesung Kim Li (CS @ University of Michigan) on LinkedIn."
-                "Determine what high school he went to, go back to the form and submit your answer."
-            ),
-        ),
-        TestCase(
-            url=path("test_llm_form.html") + "?task=instagram-follower-count",
-            prompt=(
-                "Go to Instagram and go to my profile and get my follower count."
-                "Then, return to the submission form and submit your answer."
-            ),
-        ),
-        TestCase(
-            url=path("test_llm_form.html") + "?task=discord-message",
-            prompt=(
-                "Go to Discord and text NotThatBot a paragraph of random philosophical rambling."
-                "Only after you complete this task can you return to the submission form and submit the answer."
-            ),
-        ),
-        TestCase(
-            url=path("test_llm_form.html") + "?task=llm-research",
-            prompt=(
-                "Perform research on the latest developments on Diffusion LLMs. Then, open Gmail and send an email to "
-                "mattqinli2569@gmail.com with a 2 page report your findings. Then, wait until you receive an email from"
-                "mattqinli2569@gmail.com, which will contain the answer. Once you get the answer, return to the submission form and submit the answer."
-            ),
-        )
-    ]
+        cases.append(TestCase(url=full_url, prompt=task_prompt))
 
     summary = asyncio.run(run_all(cases, concurrency=len(cases)))
     print(f"Succeeded {summary['succeeded']} / {summary['total']}")

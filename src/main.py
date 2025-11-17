@@ -4,7 +4,8 @@ from playwright.async_api import async_playwright, Playwright
 
 from agent import make_agent
 
-AUTH_STATE_PATH = Path(__file__).resolve().parent / "auth_state.json"
+# auth_state.json lives at the project root, one level above src/.
+AUTH_STATE_PATH = Path(__file__).resolve().parents[1] / "auth_state.json"
 
 
 async def run(playwright: Playwright):
@@ -26,7 +27,7 @@ async def run(playwright: Playwright):
 
     await context.tracing.stop(path = "trace.zip")
 
-    print("Task success:", result.get("task_success"))
+    print("Final status:", result.get("status"))
     await browser.close()
 
 
