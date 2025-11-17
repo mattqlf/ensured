@@ -3,7 +3,6 @@ from pathlib import Path
 from playwright.async_api import async_playwright, Playwright
 
 from agent import make_agent
-from pathlib import Path
 
 AUTH_STATE_PATH = Path(__file__).resolve().parent / "auth_state.json"
 
@@ -21,15 +20,8 @@ async def run(playwright: Playwright):
 
     await page.goto("http://localhost:8000/static/test_page2.html")
 
-    async def heading_success(page):
-        try:
-            locator = page.get_by_role("heading", name="success")
-            return (await locator.count()) > 0
-        except Exception:
-            return False
-
-    agent = make_agent(page, prompt="Navigate to the success page.", is_success=heading_success)
-    state = {"messages": [], "llm_calls": 0, "task_success": False}
+    agent = make_agent(page, prompt="Navigate to the success page.")
+    state = {"messages": [], "llm_calls": 0, "status": "in_progress"}
     result = await agent.ainvoke(state)
 
     await context.tracing.stop(path = "trace.zip")

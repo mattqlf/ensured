@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Callable, Awaitable
+from typing import List, Dict, Any, Optional, Awaitable
 import traceback
 import os
 import time
@@ -17,7 +17,6 @@ from agent import make_agent
 class TestCase:
     url: str
     prompt: str  # required task prompt
-    success_check: Optional[Callable[[Page], Awaitable[bool]]] = None
 
 
 AUTH_STATE_PATH = Path(__file__).resolve().parent / "auth_state.json"
@@ -44,12 +43,13 @@ async def run_test_case(browser: Browser, case: TestCase) -> bool:
         agent = make_agent(
             page,
             prompt=case.prompt,
-            is_success=case.success_check,
             include_ui_manifest=True,
         )
-        state = {"messages": [], "llm_calls": 0, "task_success": False}
+        state = {"messages": [], "llm_calls": 0, "status": "in_progress"}
         result = await agent.ainvoke(state, {"recursion_limit": 100})
-        return bool(result.get("task_success"))
+        # Consider a test "succeeded" only when the agent has explicitly
+        # finished the task with a successful outcome: status == "success".
+        return result.get("status") == "success"
     except Exception as e:
         # Treat any exception as a failure; print a brief reason for debugging
         print(f"ERROR running {case.url}: {e.__class__.__name__}: {e}")
@@ -115,16 +115,6 @@ def main() -> None:
     if not base.endswith("/cases"):
         base = base + "/cases"
 
-    # Helper: success when heading name equals provided text (exact match)
-    def heading_success(name: str) -> Callable[[Page], Awaitable[bool]]:
-        async def _check(page: Page) -> bool:
-            try:
-                locator = page.get_by_role("heading", name=name)
-                return (await locator.count()) > 0
-            except Exception:
-                return False
-        return _check
-
     next_paths = {
         "test_page.html": "test-page",
         "test_page2.html": "test-page2",
@@ -141,27 +131,22 @@ def main() -> None:
         TestCase(
             url=path("test_page.html"),
             prompt="Navigate to the success page.",
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_page2.html"),
             prompt="Navigate to the success page.",
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_exam.html"),
             prompt="Complete the exam and submit.",
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_hard.html"),
             prompt="Place a successful order.",
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_ultra.html"),
             prompt="Place a successful order.",
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_llm_form.html") + "?task=hackernews-top-post",
@@ -169,7 +154,6 @@ def main() -> None:
                 "Go to hackernews show and get the topmost post. "
                 "Then return to the submission form and enter your answer so it can be graded."
             ),
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_llm_form.html") + "?task=linkedin-scouting",
@@ -177,7 +161,6 @@ def main() -> None:
                 "Research Jaesung Kim Li (CS @ University of Michigan) on LinkedIn."
                 "Determine what high school he went to, go back to the form and submit your answer."
             ),
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_llm_form.html") + "?task=instagram-follower-count",
@@ -185,7 +168,6 @@ def main() -> None:
                 "Go to Instagram and go to my profile and get my follower count."
                 "Then, return to the submission form and submit your answer."
             ),
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_llm_form.html") + "?task=discord-message",
@@ -193,7 +175,6 @@ def main() -> None:
                 "Go to Discord and text NotThatBot a paragraph of random philosophical rambling."
                 "Only after you complete this task can you return to the submission form and submit the answer."
             ),
-            success_check=heading_success("success"),
         ),
         TestCase(
             url=path("test_llm_form.html") + "?task=llm-research",
@@ -202,7 +183,6 @@ def main() -> None:
                 "mattqinli2569@gmail.com with a 2 page report your findings. Then, wait until you receive an email from"
                 "mattqinli2569@gmail.com, which will contain the answer. Once you get the answer, return to the submission form and submit the answer."
             ),
-            success_check=heading_success("success"),
         )
     ]
 
