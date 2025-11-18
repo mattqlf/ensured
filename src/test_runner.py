@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Awaitable
-import traceback
+from typing import Any, Dict, List
+import argparse
+import json
 import os
 import time
-import json
+import traceback
 from pathlib import Path
 
-from playwright.async_api import async_playwright, Browser, Page
+from playwright.async_api import async_playwright, Browser
 
 from agent import make_agent
 
@@ -24,7 +25,7 @@ class TestCase:
 AUTH_STATE_PATH = Path(__file__).resolve().parents[1] / "auth_state.json"
 
 
-async def run_test_case(browser: Browser, case: TestCase) -> bool:
+async def run_test_case_browser(browser: Browser, case: TestCase) -> bool:
     # If an authenticated storage state exists (created by auth_setup.py),
     # reuse it so all tests start already logged in with a shared account.
     context_kwargs = {}
@@ -42,11 +43,7 @@ async def run_test_case(browser: Browser, case: TestCase) -> bool:
     page = await context.new_page()
     try:
         await page.goto(case.url, wait_until="load")
-        agent = make_agent(
-            page,
-            prompt=case.prompt,
-            include_ui_manifest=True,
-        )
+        agent = make_agent(page, prompt=case.prompt, include_ui_manifest=True, mode="browser")
         state = {"messages": [], "llm_calls": 0, "status": "in_progress"}
         result = await agent.ainvoke(state, {"recursion_limit": 100})
         # Consider a test "succeeded" only when the agent has explicitly
@@ -82,30 +79,98 @@ async def run_test_case(browser: Browser, case: TestCase) -> bool:
         await context.close()
 
 
-async def run_all(cases: List[TestCase], concurrency: int = 3) -> Dict[str, Any]:
+async def run_test_case_computer(case: TestCase) -> bool:
+    """Run a single test case against a Computer-based UI."""
+    try:
+        # Import here so computer is only required when using computer mode.
+        from computer import Computer  # type: ignore
+    except Exception as e:  # pragma: no cover - import guard
+        print(
+            f"ERROR: computer mode requested but 'computer' package is not available: {e}"
+        )
+        return False
+
+    computer = Computer(
+        os_type="linux",
+        provider_type="docker",
+        image="trycua/cua-xfce:latest",
+        name="my-xfce-sandbox"
+    )
+
+    try:
+        await computer.run()
+
+        # Open the starting URL inside the sandbox (e.g., in a browser).
+        await computer.interface.open(case.url)
+
+        agent = make_agent(
+            computer,
+            prompt=case.prompt,
+            mode="computer",
+            include_ui_manifest=True,
+        )
+        state: Dict[str, Any] = {"messages": [], "llm_calls": 0, "status": "in_progress"}
+        result = await agent.ainvoke(state, {"recursion_limit": 100})
+        return result.get("status") == "success"
+    except Exception as e:
+        print(f"ERROR running (computer) {case.url}: {e.__class__.__name__}: {e}")
+        tb = traceback.format_exc(limit=2)
+        print(tb.strip())
+        return False
+    finally:
+        try:
+            await computer.stop()
+        except Exception:
+            pass
+
+
+async def run_all(cases: List[TestCase], concurrency: int = 3, agent_type: str = "browser") -> Dict[str, Any]:
     results: List[Dict[str, Any]] = [None] * len(cases)  # type: ignore
     sem = asyncio.Semaphore(max(1, concurrency))
 
-    async with async_playwright() as p:
-        # Use Chromium for running tests
-        browser = await p.chromium.launch()
-        try:
-            async def run_idx(i: int, case: TestCase):
-                async with sem:
-                    ok = await run_test_case(browser, case)
-                    results[i] = {"url": case.url, "success": ok, "prompt": case.prompt}
+    if agent_type == "computer":
+        async def run_idx(i: int, case: TestCase) -> None:
+            async with sem:
+                ok = await run_test_case_computer(case)
+                results[i] = {"url": case.url, "success": ok, "prompt": case.prompt}
 
-            tasks = [asyncio.create_task(run_idx(i, c)) for i, c in enumerate(cases)]
-            await asyncio.gather(*tasks)
-        finally:
-            await browser.close()
+        tasks = [asyncio.create_task(run_idx(i, c)) for i, c in enumerate(cases)]
+        await asyncio.gather(*tasks)
+    else:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            try:
+                async def run_idx(i: int, case: TestCase) -> None:
+                    async with sem:
+                        ok = await run_test_case_browser(browser, case)
+                        results[i] = {"url": case.url, "success": ok, "prompt": case.prompt}
+
+                tasks = [asyncio.create_task(run_idx(i, c)) for i, c in enumerate(cases)]
+                await asyncio.gather(*tasks)
+            finally:
+                await browser.close()
 
     succeeded = sum(1 for r in results if r and r["success"])  # type: ignore
     failed = len(cases) - succeeded
     return {"total": len(cases), "succeeded": succeeded, "failed": failed, "results": results}
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Run LLM-driven UI tests.")
+    parser.add_argument(
+        "--agent-type",
+        choices=["browser", "computer"],
+        default="browser",
+        help="Which agent backend to use for tests.",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="Maximum number of concurrent tests (default: all for browser, 1 for computer).",
+    )
+    args = parser.parse_args(argv)
+
     # Base origin for tests (required).
     # Example: TEST_BASE_URL=http://localhost:3000
     base = os.environ["TEST_BASE_URL"].rstrip("/")
@@ -129,7 +194,13 @@ def main() -> None:
 
         cases.append(TestCase(url=full_url, prompt=task_prompt))
 
-    summary = asyncio.run(run_all(cases, concurrency=len(cases)))
+    if args.concurrency is not None:
+        concurrency = max(1, args.concurrency)
+    else:
+        # Default to full parallelism for browser, single-threaded for computer.
+        concurrency = len(cases) if args.agent_type == "browser" else 1
+
+    summary = asyncio.run(run_all(cases, concurrency=concurrency, agent_type=args.agent_type))
     print(f"Succeeded {summary['succeeded']} / {summary['total']}")
     for r in summary["results"]:
         print(f"- {r['url']}: {'OK' if r['success'] else 'FAIL'}")
