@@ -13,3 +13,4 @@ traces/
 prompts/
 service.json
 auth_state.json
+cli_auth.json

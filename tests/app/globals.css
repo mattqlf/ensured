@@ -2,49 +2,193 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --popover: #ffffff;
+  --popover-foreground: #09090b;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #18181b;
+  --radius: 0.5rem;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  
+  --animate-fade-in-up: fadeInUp 0.5s ease-out forwards;
+  --animate-fade-in: fadeIn 0.5s ease-out forwards;
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 20px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #09090b;
+    --foreground: #fafafa;
+    --card: #09090b;
+    --card-foreground: #fafafa;
+    --popover: #09090b;
+    --popover-foreground: #fafafa;
+    --primary: #fafafa;
+    --primary-foreground: #18181b;
+    --secondary: #27272a;
+    --secondary-foreground: #fafafa;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --accent: #27272a;
+    --accent-foreground: #fafafa;
+    --destructive: #7f1d1d;
+    --destructive-foreground: #fafafa;
+    --border: #27272a;
+    --input: #27272a;
+    --ring: #d4d4d8;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Minimal UI kit built with Tailwind utilities */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Legacy Support / Component Layer for Existing Pages */
 @layer components {
-  .page { @apply min-h-screen bg-gradient-to-b from-zinc-50 to-zinc-100 text-zinc-800 dark:from-zinc-950 dark:to-black dark:text-zinc-100; }
-  .app-header { @apply sticky top-0 z-10 bg-white/70 backdrop-blur border-b border-zinc-200 dark:bg-zinc-950/60 dark:border-zinc-800; }
-  .app-header-inner { @apply mx-auto max-w-5xl flex items-center justify-between gap-4 px-4 py-3; }
-  .nav-link { @apply text-blue-600 hover:underline dark:text-blue-400; }
-  .container { @apply mx-auto max-w-5xl px-4 py-8; }
-  .card { @apply bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-sm p-6; }
-  .row { @apply flex items-center gap-3 my-3; }
-  .btn { @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed; }
-  .btn-primary { @apply bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600; }
-  .btn-secondary { @apply bg-zinc-100 text-zinc-900 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700; }
-  .btn-outline { @apply border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800; }
-  .input { @apply w-full max-w-md rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm; }
-  .select { @apply rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 px-3 py-2 text-sm; }
-  .label { @apply block text-sm font-medium mb-1; }
-  .tabs { @apply flex gap-2 border-b border-zinc-200 dark:border-zinc-800; }
-  .tab { @apply rounded-t-lg border border-zinc-300 dark:border-zinc-700 border-b-0 px-3 py-2 bg-zinc-50 dark:bg-zinc-900; }
-  .tab[aria-selected="true"] { @apply bg-white dark:bg-zinc-950 font-semibold; }
-  .panel { @apply border border-zinc-300 dark:border-zinc-700 rounded-b-lg p-4 bg-white dark:bg-zinc-950; }
-  .dialog-backdrop { @apply fixed inset-0 bg-black/40; }
-  .dialog { @apply fixed inset-0 m-auto w-[420px] max-w-[90vw] rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-6 shadow-xl; }
+  .page {
+    @apply min-h-screen bg-background text-foreground;
+  }
+  
+  .app-header {
+    @apply sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border;
+  }
+  
+  .app-header-inner {
+    @apply mx-auto max-w-7xl flex items-center justify-between gap-4 px-6 py-4;
+  }
+  
+  .nav-link {
+    @apply text-sm font-medium text-muted-foreground hover:text-foreground transition-colors;
+  }
+  
+  .container {
+    @apply mx-auto max-w-7xl px-6 py-8;
+  }
+  
+  .card {
+    @apply rounded-xl border border-border bg-card text-card-foreground shadow-sm p-6;
+  }
+  
+  .row {
+    @apply flex items-center gap-3 my-3;
+  }
+  
+  .btn {
+    @apply inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 h-10 px-4 py-2;
+  }
+  
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90;
+  }
+  
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80;
+  }
+  
+  .btn-outline {
+    @apply border border-input bg-background hover:bg-accent hover:text-accent-foreground;
+  }
+  
+  .input {
+    @apply flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  
+  .select {
+    @apply flex h-10 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  
+  .label {
+    @apply text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 mb-2 block;
+  }
+  
+  .tabs {
+    @apply inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground;
+  }
+  
+  .tab {
+    @apply inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  }
+  
+  .tab[aria-selected="true"] {
+    @apply bg-background text-foreground shadow-sm;
+  }
+  
+  .panel {
+    @apply mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border rounded-lg p-4;
+  }
+  
+  .dialog-backdrop {
+    @apply fixed inset-0 z-50 bg-black/80 transition-opacity;
+  }
+  
+  .dialog {
+    @apply fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg transition-all sm:rounded-lg;
+  }
 }

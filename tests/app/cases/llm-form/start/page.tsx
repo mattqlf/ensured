@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, Suspense } from "react";
 
-export default function LlmFormStartPage() {
+function LlmFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const taskId = searchParams.get("task");
@@ -45,36 +45,44 @@ export default function LlmFormStartPage() {
   }
 
   return (
+    <div className="card max-w-3xl">
+      <h1 className="text-3xl font-semibold">Submit your answer</h1>
+      <form onSubmit={onSubmit} className="mt-6 space-y-4" aria-label="Task answer form">
+        <div>
+          <label htmlFor="answer" className="label">
+            Final answer
+          </label>
+          <textarea
+            id="answer"
+            className="input"
+            rows={3}
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Type your final answer here"
+          />
+        </div>
+        <div className="row">
+          <button id="submit" type="submit" className="btn btn-primary" disabled={submitting}>
+            {submitting ? "Submitting..." : "Submit answer"}
+          </button>
+        </div>
+        {status && (
+          <p id="status" role="status" aria-live="polite" className="text-sm text-red-700">
+            {status}
+          </p>
+        )}
+      </form>
+    </div>
+  );
+}
+
+export default function LlmFormStartPage() {
+  return (
     <div className="page">
       <main className="container">
-        <div className="card max-w-3xl">
-          <h1 className="text-3xl font-semibold">Submit your answer</h1>
-          <form onSubmit={onSubmit} className="mt-6 space-y-4" aria-label="Task answer form">
-            <div>
-              <label htmlFor="answer" className="label">
-                Final answer
-              </label>
-              <textarea
-                id="answer"
-                className="input"
-                rows={3}
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                placeholder="Type your final answer here"
-              />
-            </div>
-            <div className="row">
-              <button id="submit" type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? "Submitting..." : "Submit answer"}
-              </button>
-            </div>
-            {status && (
-              <p id="status" role="status" aria-live="polite" className="text-sm text-red-700">
-                {status}
-              </p>
-            )}
-          </form>
-        </div>
+        <Suspense fallback={<div>Loading...</div>}>
+          <LlmFormContent />
+        </Suspense>
       </main>
     </div>
   );

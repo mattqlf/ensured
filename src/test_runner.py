@@ -1,19 +1,30 @@
 from __future__ import annotations
 
+import os
+
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import argparse
 import json
-import os
 import time
 import traceback
 from pathlib import Path
+from datetime import datetime, timezone
+
+import requests
+from langsmith import uuid7
 
 from playwright.async_api import async_playwright, Browser
 
 from agent import make_agent
+import cli_auth
 
+from rich.console import Console
+from rich.text import Text
+from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+
+console = Console()
 
 @dataclass
 class TestCase:
@@ -25,7 +36,94 @@ class TestCase:
 AUTH_STATE_PATH = Path(__file__).resolve().parents[1] / "auth_state.json"
 
 
-async def run_test_case_browser(browser: Browser, case: TestCase) -> bool:
+def _serialize_messages(messages: List[Any]) -> List[Dict[str, Any]]:
+    """Convert LangChain messages to a JSON-serializable format."""
+    serialized = []
+    for msg in messages:
+        role = "unknown"
+        if msg.type == "human":
+            role = "user"
+        elif msg.type == "ai":
+            role = "assistant"
+        elif msg.type == "tool":
+            role = "tool"
+        elif msg.type == "system":
+            role = "system"
+        
+        content = msg.content
+        # Simplify content if it's a list (multimodal)
+        if isinstance(content, list):
+            processed_content = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "image_url":
+                         processed_content.append({"type": "image", "url": part["image_url"]["url"]})
+                    elif part.get("type") == "image":
+                        # Truncate huge base64 strings for logging/display if needed, 
+                        # but for now we keep them so the frontend can render.
+                        # If it's too big for Firestore (1MB), this will fail.
+                        # Ideally we'd upload to storage, but for now let's try saving.
+                        processed_content.append(part) 
+                    else:
+                        processed_content.append(part)
+                else:
+                    processed_content.append(str(part))
+            content = processed_content
+
+        entry = {
+            "role": role,
+            "content": content,
+            "type": msg.type
+        }
+        
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            entry["tool_calls"] = msg.tool_calls
+        if hasattr(msg, "tool_call_id"):
+            entry["tool_call_id"] = msg.tool_call_id
+        if hasattr(msg, "name"):
+            entry["name"] = msg.name
+
+        serialized.append(entry)
+    return serialized
+
+
+def save_run_to_api(run_id: str, url: str, prompt: str, status: str, messages: List[Any], timestamp: str):
+    """Send the run transcript to the API."""
+    try:
+        token = cli_auth.get_token_silent()
+        if not token:
+            return
+
+        transcript = _serialize_messages(messages)
+        api_url = "http://localhost:3000/api/runs" # Assuming local dev
+        # Check env var for base URL if needed
+        if os.environ.get("TEST_BASE_URL"):
+             # Try to infer API base from TEST_BASE_URL if it's pointing to the app
+             pass
+
+        payload = {
+            "run_id": run_id,
+            "url": url,
+            "prompt": prompt,
+            "status": status,
+            "transcript": transcript,
+            "timestamp": timestamp
+        }
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(api_url, json=payload, headers=headers, timeout=10)
+        if response.status_code != 200:
+             console.print(f"[yellow]Warning: Failed to save run to API: {response.status_code} {response.text}[/yellow]")
+
+    except Exception as e:
+         console.print(f"[yellow]Warning: Error saving run to API: {e}[/yellow]")
+
+
+async def run_test_case_browser(browser: Browser, case: TestCase) -> tuple[bool, str]:
     # If an authenticated storage state exists (created by auth_setup.py),
     # reuse it so all tests start already logged in with a shared account.
     context_kwargs = {}
@@ -41,30 +139,48 @@ async def run_test_case_browser(browser: Browser, case: TestCase) -> bool:
         pass
 
     page = await context.new_page()
+    run_id = str(uuid7())
+    messages = []
+    status = "running"
+    # Generate a stable timestamp for this run (timezone-aware, UTC).
+    run_timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
     try:
         await page.goto(case.url, wait_until="load")
-        agent = make_agent(page, prompt=case.prompt, include_ui_manifest=True, mode="browser")
+        agent = make_agent(page, prompt=case.prompt, include_ui_manifest=True, mode="browser", run_id=run_id)
         state = {"messages": [], "llm_calls": 0, "status": "in_progress"}
-        result = await agent.ainvoke(state, {"recursion_limit": 100})
+        
+        # Create initial run entry
+        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, [], run_timestamp)
+
+        async for chunk in agent.astream(state, {"recursion_limit": 100}, stream_mode="values"):
+            messages = chunk.get("messages", [])
+            status = chunk.get("status", "in_progress")
+            await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp)
+        
         # Consider a test "succeeded" only when the agent has explicitly
         # finished the task with a successful outcome: status == "success".
-        return result.get("status") == "success"
+        return status == "success", run_id
     except Exception as e:
         # Treat any exception as a failure; print a brief reason for debugging
-        print(f"ERROR running {case.url}: {e.__class__.__name__}: {e}")
+        console.print(f"[bold red]ERROR running {case.url}: {e.__class__.__name__}: {e}[/bold red]")
         tb = traceback.format_exc(limit=2)
-        print(tb.strip())
+        console.print(tb.strip())
+        status = "failure"
         try:
             # Attempt a quick failure screenshot for diagnosis
             png = await page.screenshot(full_page=False)
             fname = f"failure_{int(time.time())}.png"
             with open(fname, "wb") as f:
                 f.write(png)
-            print(f"Saved failure screenshot to {fname}")
+            console.print(f"[yellow]Saved failure screenshot to {fname}[/yellow]")
         except Exception:
             pass
-        return False
+        return False, run_id
     finally:
+        # Final save
+        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp)
+
         # Stop tracing and persist the trace to a unique file for this case
         try:
             traces_dir = Path(__file__).resolve().parents[1] / "traces"
@@ -73,22 +189,22 @@ async def run_test_case_browser(browser: Browser, case: TestCase) -> bool:
             slug = (slug.rsplit('.', 1)[0]) or "page"
             trace_path = traces_dir / f"trace_{slug}_{int(time.time()*1000)}.zip"
             await context.tracing.stop(path=str(trace_path))
-            print(f"Saved trace to {trace_path}")
+            console.print(f"[dim]Saved trace to {trace_path}[/dim]")
         except Exception:
             pass
         await context.close()
 
 
-async def run_test_case_computer(case: TestCase) -> bool:
+async def run_test_case_computer(case: TestCase) -> tuple[bool, str]:
     """Run a single test case against a Computer-based UI."""
     try:
         # Import here so computer is only required when using computer mode.
         from computer import Computer  # type: ignore
     except Exception as e:  # pragma: no cover - import guard
-        print(
-            f"ERROR: computer mode requested but 'computer' package is not available: {e}"
+        console.print(
+            f"[bold red]ERROR: computer mode requested but 'computer' package is not available: {e}[/bold red]"
         )
-        return False
+        return False, ""
 
     computer = Computer(
         os_type="linux",
@@ -96,6 +212,12 @@ async def run_test_case_computer(case: TestCase) -> bool:
         image="trycua/cua-xfce:latest",
         name="my-xfce-sandbox"
     )
+
+    run_id = str(uuid7())
+    messages = []
+    status = "running"
+    # Generate a stable timestamp for this run (timezone-aware, UTC).
+    run_timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     try:
         await computer.run()
@@ -108,31 +230,58 @@ async def run_test_case_computer(case: TestCase) -> bool:
             prompt=case.prompt,
             mode="computer",
             include_ui_manifest=True,
+            run_id=run_id
         )
         state: Dict[str, Any] = {"messages": [], "llm_calls": 0, "status": "in_progress"}
-        result = await agent.ainvoke(state, {"recursion_limit": 100})
-        return result.get("status") == "success"
+        
+        # Create initial run entry
+        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, [], run_timestamp)
+        
+        async for chunk in agent.astream(state, {"recursion_limit": 100}, stream_mode="values"):
+            messages = chunk.get("messages", [])
+            status = chunk.get("status", "in_progress")
+            await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp)
+
+        return status == "success", run_id
     except Exception as e:
-        print(f"ERROR running (computer) {case.url}: {e.__class__.__name__}: {e}")
+        console.print(f"[bold red]ERROR running (computer) {case.url}: {e.__class__.__name__}: {e}[/bold red]")
         tb = traceback.format_exc(limit=2)
-        print(tb.strip())
-        return False
+        console.print(tb.strip())
+        status = "failure"
+        return False, run_id
     finally:
+        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp)
         try:
             await computer.stop()
         except Exception:
             pass
 
 
-async def run_all(cases: List[TestCase], concurrency: int = 3, agent_type: str = "browser") -> Dict[str, Any]:
+async def run_all(
+    cases: List[TestCase],
+    concurrency: int = 3,
+    agent_type: str = "browser",
+    progress: Optional[Progress] = None,
+    progress_task_id: Any | None = None,
+) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = [None] * len(cases)  # type: ignore
     sem = asyncio.Semaphore(max(1, concurrency))
+
+    def _advance_progress() -> None:
+        if progress is not None and progress_task_id is not None:
+            progress.advance(progress_task_id)
 
     if agent_type == "computer":
         async def run_idx(i: int, case: TestCase) -> None:
             async with sem:
-                ok = await run_test_case_computer(case)
-                results[i] = {"url": case.url, "success": ok, "prompt": case.prompt}
+                ok, run_id = await run_test_case_computer(case)
+                results[i] = {
+                    "url": case.url,
+                    "success": ok,
+                    "prompt": case.prompt,
+                    "run_id": run_id,
+                }
+                _advance_progress()
 
         tasks = [asyncio.create_task(run_idx(i, c)) for i, c in enumerate(cases)]
         await asyncio.gather(*tasks)
@@ -142,8 +291,14 @@ async def run_all(cases: List[TestCase], concurrency: int = 3, agent_type: str =
             try:
                 async def run_idx(i: int, case: TestCase) -> None:
                     async with sem:
-                        ok = await run_test_case_browser(browser, case)
-                        results[i] = {"url": case.url, "success": ok, "prompt": case.prompt}
+                        ok, run_id = await run_test_case_browser(browser, case)
+                        results[i] = {
+                            "url": case.url,
+                            "success": ok,
+                            "prompt": case.prompt,
+                            "run_id": run_id,
+                        }
+                        _advance_progress()
 
                 tasks = [asyncio.create_task(run_idx(i, c)) for i, c in enumerate(cases)]
                 await asyncio.gather(*tasks)
@@ -156,6 +311,9 @@ async def run_all(cases: List[TestCase], concurrency: int = 3, agent_type: str =
 
 
 def main(argv: list[str] | None = None) -> None:
+    # Ensure the user is authenticated via the CLI.
+    cli_auth.get_or_prompt_token()
+
     parser = argparse.ArgumentParser(description="Run LLM-driven UI tests.")
     parser.add_argument(
         "--agent-type",
@@ -177,7 +335,14 @@ def main(argv: list[str] | None = None) -> None:
 
     # Load structured test definitions from tests/test_cases.json at the project root.
     tests_path = Path(__file__).resolve().parents[1] / "tests" / "test_cases.json"
-    raw = json.loads(tests_path.read_text())
+    try:
+        raw = json.loads(tests_path.read_text())
+    except FileNotFoundError:
+        console.print(f"[bold red]Error: Test cases file not found at {tests_path}[/bold red]")
+        return
+    except json.JSONDecodeError:
+        console.print(f"[bold red]Error: Invalid JSON in {tests_path}[/bold red]")
+        return
 
     cases: List[TestCase] = []
     for entry in raw:
@@ -200,11 +365,42 @@ def main(argv: list[str] | None = None) -> None:
         # Default to full parallelism for browser, single-threaded for computer.
         concurrency = len(cases) if args.agent_type == "browser" else 1
 
-    summary = asyncio.run(run_all(cases, concurrency=concurrency, agent_type=args.agent_type))
-    print(f"Succeeded {summary['succeeded']} / {summary['total']}")
-    for r in summary["results"]:
-        print(f"- {r['url']}: {'OK' if r['success'] else 'FAIL'}")
+    # Use a single progress bar to track overall test execution.
+    progress = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    )
 
+    async def _run_all_with_progress() -> Dict[str, Any]:
+        task_id = progress.add_task("Running tests", total=len(cases))
+        summary = await run_all(
+            cases,
+            concurrency=concurrency,
+            agent_type=args.agent_type,
+            progress=progress,
+            progress_task_id=task_id,
+        )
+        # Ensure progress is marked complete even if concurrency or results differ.
+        progress.update(task_id, completed=len(cases))
+        return summary
+
+    console.print(Text("Starting tests...", style="bold magenta"))
+    with progress:
+        summary = asyncio.run(_run_all_with_progress())
+    console.print(Text("All tests finished.", style="bold magenta"))
+
+    console.print(f"\n[bold]Summary:[/bold]")
+    console.print(f"Succeeded [green]{summary['succeeded']}[/green] / [bold]{summary['total']}[/bold]")
+    if summary['failed'] > 0:
+        console.print(f"Failed [red]{summary['failed']}[/red] / [bold]{summary['total']}[/bold]")
+
+    for r in summary["results"]:
+        status_text = "[green]OK" if r["success"] else "[red]FAIL"
+        console.print(f"- [link={r['url']}]{r['url']}[/link]: {status_text} (Run ID: [dim]{r['run_id']}[/dim])")
 
 if __name__ == "__main__":
     main()
