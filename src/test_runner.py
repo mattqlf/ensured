@@ -26,6 +26,8 @@ from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, Ti
 
 console = Console()
 
+PROJECT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "ensured.project.json"
+
 @dataclass
 class TestCase:
     url: str
@@ -34,6 +36,39 @@ class TestCase:
 
 # auth_state.json and traces/ live at the project root, one level above src/.
 AUTH_STATE_PATH = Path(__file__).resolve().parents[1] / "auth_state.json"
+
+def load_project_config() -> Dict[str, str] | None:
+    try:
+        if PROJECT_CONFIG_PATH.exists():
+            data = json.loads(PROJECT_CONFIG_PATH.read_text())
+            if isinstance(data, dict):
+                return {
+                    "project_id": str(data.get("project_id", "")).strip(),
+                    "project_name": str(data.get("project_name", "")).strip(),
+                    "repo_url": str(data.get("repo_url", "")).strip(),
+                }
+    except Exception:
+        return None
+    return None
+
+
+def save_project_config(project_id: str, project_name: str, repo_url: str = "") -> None:
+    PROJECT_CONFIG_PATH.write_text(
+        json.dumps(
+            {
+                "project_id": project_id,
+                "project_name": project_name,
+                "repo_url": repo_url,
+            },
+            indent=2,
+        )
+    )
+    console.print(
+        Text(
+            f"[project] Saved project config to {PROJECT_CONFIG_PATH}",
+            style="green",
+        )
+    )
 
 
 def _serialize_messages(messages: List[Any]) -> List[Dict[str, Any]]:
@@ -87,7 +122,15 @@ def _serialize_messages(messages: List[Any]) -> List[Dict[str, Any]]:
     return serialized
 
 
-def save_run_to_api(run_id: str, url: str, prompt: str, status: str, messages: List[Any], timestamp: str):
+def save_run_to_api(
+    run_id: str,
+    url: str,
+    prompt: str,
+    status: str,
+    messages: List[Any],
+    timestamp: str,
+    project_meta: Optional[Dict[str, str]] = None,
+):
     """Send the run transcript to the API."""
     try:
         token = cli_auth.get_token_silent()
@@ -101,7 +144,7 @@ def save_run_to_api(run_id: str, url: str, prompt: str, status: str, messages: L
              # Try to infer API base from TEST_BASE_URL if it's pointing to the app
              pass
 
-        payload = {
+        payload: Dict[str, Any] = {
             "run_id": run_id,
             "url": url,
             "prompt": prompt,
@@ -109,6 +152,14 @@ def save_run_to_api(run_id: str, url: str, prompt: str, status: str, messages: L
             "transcript": transcript,
             "timestamp": timestamp
         }
+
+        if project_meta:
+            if project_meta.get("project_id"):
+                payload["project_id"] = project_meta["project_id"]
+            if project_meta.get("project_name"):
+                payload["project_name"] = project_meta["project_name"]
+            if project_meta.get("repo_url"):
+                payload["repo_url"] = project_meta["repo_url"]
 
         headers = {
             "Authorization": f"Bearer {token}",
@@ -123,7 +174,7 @@ def save_run_to_api(run_id: str, url: str, prompt: str, status: str, messages: L
          console.print(f"[yellow]Warning: Error saving run to API: {e}[/yellow]")
 
 
-async def run_test_case_browser(browser: Browser, case: TestCase) -> tuple[bool, str]:
+async def run_test_case_browser(browser: Browser, case: TestCase, project_meta: Optional[Dict[str, str]]) -> tuple[bool, str]:
     # If an authenticated storage state exists (created by auth_setup.py),
     # reuse it so all tests start already logged in with a shared account.
     context_kwargs = {}
@@ -151,12 +202,12 @@ async def run_test_case_browser(browser: Browser, case: TestCase) -> tuple[bool,
         state = {"messages": [], "llm_calls": 0, "status": "in_progress"}
         
         # Create initial run entry
-        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, [], run_timestamp)
+        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, [], run_timestamp, project_meta)
 
         async for chunk in agent.astream(state, {"recursion_limit": 100}, stream_mode="values"):
             messages = chunk.get("messages", [])
             status = chunk.get("status", "in_progress")
-            await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp)
+            await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp, project_meta)
         
         # Consider a test "succeeded" only when the agent has explicitly
         # finished the task with a successful outcome: status == "success".
@@ -179,7 +230,7 @@ async def run_test_case_browser(browser: Browser, case: TestCase) -> tuple[bool,
         return False, run_id
     finally:
         # Final save
-        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp)
+        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp, project_meta)
 
         # Stop tracing and persist the trace to a unique file for this case
         try:
@@ -195,7 +246,7 @@ async def run_test_case_browser(browser: Browser, case: TestCase) -> tuple[bool,
         await context.close()
 
 
-async def run_test_case_computer(case: TestCase) -> tuple[bool, str]:
+async def run_test_case_computer(case: TestCase, project_meta: Optional[Dict[str, str]]) -> tuple[bool, str]:
     """Run a single test case against a Computer-based UI."""
     try:
         # Import here so computer is only required when using computer mode.
@@ -235,12 +286,12 @@ async def run_test_case_computer(case: TestCase) -> tuple[bool, str]:
         state: Dict[str, Any] = {"messages": [], "llm_calls": 0, "status": "in_progress"}
         
         # Create initial run entry
-        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, [], run_timestamp)
+        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, [], run_timestamp, project_meta)
         
         async for chunk in agent.astream(state, {"recursion_limit": 100}, stream_mode="values"):
             messages = chunk.get("messages", [])
             status = chunk.get("status", "in_progress")
-            await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp)
+            await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp, project_meta)
 
         return status == "success", run_id
     except Exception as e:
@@ -250,7 +301,7 @@ async def run_test_case_computer(case: TestCase) -> tuple[bool, str]:
         status = "failure"
         return False, run_id
     finally:
-        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp)
+        await asyncio.to_thread(save_run_to_api, run_id, case.url, case.prompt, status, messages, run_timestamp, project_meta)
         try:
             await computer.stop()
         except Exception:
@@ -263,6 +314,7 @@ async def run_all(
     agent_type: str = "browser",
     progress: Optional[Progress] = None,
     progress_task_id: Any | None = None,
+    project_meta: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = [None] * len(cases)  # type: ignore
     sem = asyncio.Semaphore(max(1, concurrency))
@@ -274,7 +326,7 @@ async def run_all(
     if agent_type == "computer":
         async def run_idx(i: int, case: TestCase) -> None:
             async with sem:
-                ok, run_id = await run_test_case_computer(case)
+                ok, run_id = await run_test_case_computer(case, project_meta)
                 results[i] = {
                     "url": case.url,
                     "success": ok,
@@ -291,7 +343,7 @@ async def run_all(
             try:
                 async def run_idx(i: int, case: TestCase) -> None:
                     async with sem:
-                        ok, run_id = await run_test_case_browser(browser, case)
+                        ok, run_id = await run_test_case_browser(browser, case, project_meta)
                         results[i] = {
                             "url": case.url,
                             "success": ok,
@@ -327,7 +379,57 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Maximum number of concurrent tests (default: all for browser, 1 for computer).",
     )
+    parser.add_argument(
+        "--project-id",
+        dest="project_id",
+        default=None,
+        help="Project ID to tag all runs with (also written to ensured.project.json).",
+    )
+    parser.add_argument(
+        "--project-name",
+        dest="project_name",
+        default=None,
+        help="Project name to display in the dashboard (defaults to the ID).",
+    )
+    parser.add_argument(
+        "--repo-url",
+        dest="repo_url",
+        default=None,
+        help="Repository URL for this project (saved to ensured.project.json).",
+    )
+    parser.add_argument(
+        "--init-project",
+        action="store_true",
+        help="Create or update ensured.project.json with the provided project metadata and exit.",
+    )
     args = parser.parse_args(argv)
+
+    if args.init_project:
+        project_id = args.project_id or str(uuid7())
+        project_name = args.project_name or project_id
+        repo_url = args.repo_url or ""
+        save_project_config(project_id, project_name, repo_url)
+        console.print(Text(f"[project] Initialized project '{project_name}' ({project_id})", style="green"))
+        return
+
+    project_meta: Dict[str, str] = {}
+    existing_project = load_project_config()
+    if existing_project:
+        project_meta.update(existing_project)
+
+    if args.project_id:
+        project_meta["project_id"] = args.project_id
+    if args.project_name:
+        project_meta["project_name"] = args.project_name
+    if args.repo_url:
+        project_meta["repo_url"] = args.repo_url
+
+    if project_meta.get("project_id"):
+        save_project_config(
+            project_meta["project_id"],
+            project_meta.get("project_name", project_meta["project_id"]),
+            project_meta.get("repo_url", ""),
+        )
 
     # Base origin for tests (required).
     # Example: TEST_BASE_URL=http://localhost:3000
@@ -365,6 +467,14 @@ def main(argv: list[str] | None = None) -> None:
         # Default to full parallelism for browser, single-threaded for computer.
         concurrency = len(cases) if args.agent_type == "browser" else 1
 
+    if project_meta:
+        console.print(
+            Text(
+                f"[project] Running under project '{project_meta.get('project_name', project_meta.get('project_id', ''))}'",
+                style="cyan",
+            )
+        )
+
     # Use a single progress bar to track overall test execution.
     progress = Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -383,6 +493,7 @@ def main(argv: list[str] | None = None) -> None:
             agent_type=args.agent_type,
             progress=progress,
             progress_task_id=task_id,
+            project_meta=project_meta if project_meta else None,
         )
         # Ensure progress is marked complete even if concurrency or results differ.
         progress.update(task_id, completed=len(cases))

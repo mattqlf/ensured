@@ -9,6 +9,9 @@ interface CreateRunRequestBody {
   status: Run['status'];
   transcript?: TranscriptStep[];
   timestamp?: string;
+  project_id?: string;
+  project_name?: string;
+  repo_url?: string;
 }
 
 export async function POST(request: Request) {
@@ -30,21 +33,27 @@ export async function POST(request: Request) {
 
   try {
     const body: CreateRunRequestBody = await request.json();
-    const { run_id, url, prompt, status, transcript, timestamp } = body;
+    const { run_id, url, prompt, status, transcript, timestamp, project_id, project_name, repo_url } = body;
 
     if (!run_id || !url || !prompt || !status) {
         return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
     // Admin SDK syntax: collection(...).doc(...)
-    await db.collection('users').doc(uid).collection('test_runs').doc(run_id).set({
+    const runData: any = {
       run_id,
       url,
       prompt,
       status,
       transcript: transcript || [],
       timestamp: timestamp || new Date().toISOString(),
-    });
+    };
+
+    if (project_id) runData.project_id = project_id;
+    if (project_name) runData.project_name = project_name;
+    if (repo_url) runData.repo_url = repo_url;
+
+    await db.collection('users').doc(uid).collection('test_runs').doc(run_id).set(runData);
 
     return NextResponse.json({ success: true, run_id });
   } catch (error: any) {
@@ -77,11 +86,21 @@ export async function GET(request: Request) {
       .limit(50)
       .get();
 
-    const runs: Run[] = runsSnapshot.docs.map(doc => ({
-      ...(doc.data() as Omit<Run, 'timestamp' | 'transcript'>),
-      timestamp: doc.data().timestamp.toDate().toISOString(),
-      transcript: doc.data().transcript || [],
-    }));
+    const runs: Run[] = runsSnapshot.docs.map(doc => {
+      const data = doc.data();
+      let timestamp = data.timestamp;
+      if (timestamp && typeof (timestamp as any).toDate === 'function') {
+        timestamp = (timestamp as any).toDate().toISOString();
+      } else if (typeof timestamp !== 'string') {
+        timestamp = new Date().toISOString();
+      }
+
+      return {
+        ...(data as Omit<Run, 'timestamp' | 'transcript'>),
+        timestamp: timestamp as string,
+        transcript: data.transcript || [],
+      };
+    });
     return NextResponse.json(runs);
   } catch (error: any) {
     console.error('Error fetching runs:', error);

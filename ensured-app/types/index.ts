@@ -33,5 +33,8 @@ export interface Run {
   status: "success" | "failure" | "in_progress" | "queued";
   timestamp: string; // ISO date string
   transcript: TranscriptStep[];
+  project_id?: string;
+  project_name?: string;
+  repo_url?: string;
   // Add other fields as they become relevant
 }
